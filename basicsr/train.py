@@ -225,19 +225,20 @@ def main():
     train_loader, train_sampler, val_loader, total_epochs, total_iters = result
 
     # create model
+    model = create_model(opt)
+    if opt['num_gpu'] > 1:
+        model = torch.nn.DataParallel(model)
+
     if resume_state:  # resume training
         check_resume(opt, resume_state['iter'])
-        model = create_model(opt)
-        if opt['num_gpu'] > 1:
-            model = torch.nn.DataParallel(model)
         model.resume_training(resume_state)  # handle optimizers and schedulers
         logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
         start_epoch = resume_state.get('epoch', 0)
         current_iter = resume_state.get('iter', 0)
-    else:
-        model = create_model(opt)
-        if opt['num_gpu'] > 1:
-            model = torch.nn.DataParallel(model)
+    # else:
+    #     model = create_model(opt)
+    #     if opt['num_gpu'] > 1:
+    #         model = torch.nn.DataParallel(model)
 
     # create message logger (formatted outputs)
     msg_logger = MessageLogger(opt, tb_logger=tb_logger)
@@ -261,10 +262,10 @@ def main():
     best_psnr = -36.9
 
     # 计算每个 epoch 的迭代次数和总 epoch 数
-    num_iter_per_epoch = math.ceil(
-        len(train_loader.dataset) * opt['datasets']['train'].get('dataset_enlarge_ratio', 1) /
-        (opt['datasets']['train']['batch_size_per_gpu'] * opt['world_size']))
-    total_epochs = math.ceil(total_iters / num_iter_per_epoch)
+    # num_iter_per_epoch = math.ceil(
+    #     len(train_loader.dataset) * opt['datasets']['train'].get('dataset_enlarge_ratio', 1) /
+    #     (opt['datasets']['train']['batch_size_per_gpu'] * opt['world_size']))
+    # total_epochs = math.ceil(total_iters / num_iter_per_epoch)
 
     # 训练循环
     for epoch in range(start_epoch, total_epochs):
@@ -280,7 +281,11 @@ def main():
                 break
 
             # 更新学习率
-            model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            #model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            if hasattr(model, 'module'):
+                model.module.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            else:
+                model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
 
             # 将数据移动到正确的设备
             device = torch.device(opt['device'])
