@@ -99,11 +99,16 @@ class ImageRestorationModel(BaseModel):
         elif optim_type == 'AdamW':
             self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
                                                  **train_opt['optim_g'])
-            pass
+            #pass
         else:
             raise NotImplementedError(
                 f'optimizer {optim_type} is not supperted yet.')
         self.optimizers.append(self.optimizer_g)
+
+    def update_learning_rate(self, current_iter, warmup_iter=-1):
+        # 在这里定义 update_learning_rate 方法
+        for scheduler in self.lr_schedulers:  #lr_schedulers 是一个包含学习率调度器的列表
+            scheduler.step()
 
     def feed_data(self, data, is_val=False):
         self.lq = data['lq'].to(self.device)

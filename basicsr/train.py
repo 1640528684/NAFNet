@@ -178,94 +178,50 @@ def main():
     # automatic resume ..
     # state_folder_path = 'experiments/{}/training_states/'.format(opt['name'])
     #修改点2
-    state_folder_path = os.path.join(current_dir, 'experiments', opt['name'], 'training_states')  # 修改为动态路径
+    #state_folder_path = os.path.join(current_dir, 'experiments', opt['name'], 'training_states')  # 修改为动态路径
     # import os
     # try:
     #     states = os.listdir(state_folder_path)
     # except:
     #     states = []
-    try:
-        states = os.listdir(state_folder_path)
-    except:
-        states = []
+    # try:
+    #     states = os.listdir(state_folder_path)
+    # except:
+    #     states = []
 
-    resume_state = None
-    if len(states) > 0:
-        print('!!!!!! resume state .. ', states, state_folder_path)
-        max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
-        resume_state = os.path.join(state_folder_path, max_state_file)
-        opt['path']['resume_state'] = resume_state
+    # 创建模型
+    model = create_model(opt)
 
-    # load resume states if necessary
-    if opt['path'].get('resume_state'):
-        # 从 CPU 加载模型
-        resume_state = torch.load(opt['path']['resume_state'], map_location=torch.device('cpu'))
-    else:
-        resume_state = None
+    # 如果有多个 GPU，使用 DataParallel 包装模型
+    if opt['num_gpu'] > 1:
+        model.net_g = torch.nn.DataParallel(model.net_g)
 
-    # mkdir for experiments and logger
-    if resume_state is None:
-        make_exp_dirs(opt)
-        if opt['logger'].get('use_tb_logger') and 'debug' not in opt[
-                'name'] and opt['rank'] == 0:
-            mkdir_and_rename(osp.join('tb_logger', opt['name']))
-
-    # initialize loggers
+    # 初始化日志记录器
     logger, tb_logger = init_loggers(opt)
 
-    # create train and validation dataloaders
+    # 创建训练和验证数据加载器
     result = create_train_val_dataloader(opt, logger)
     train_loader, train_sampler, val_loader, total_epochs, total_iters = result
 
-    # create model
-    if resume_state:  # resume training
-        check_resume(opt, resume_state['iter'])
-        model = create_model(opt)
-        if opt['num_gpu'] > 1:
-            model = torch.nn.DataParallel(model)
-        model.resume_training(resume_state)  # handle optimizers and schedulers
-        logger.info(f"Resuming training from epoch: {resume_state['epoch']}, "
-                    f"iter: {resume_state['iter']}.")
-        start_epoch = resume_state['epoch']
-        current_iter = resume_state['iter']
-    else:
-        model = create_model(opt)
-        if opt['num_gpu'] > 1:
-            model = torch.nn.DataParallel(model)
-        start_epoch = 0
-        current_iter = 0
+    # 创建消息记录器（格式化输出）
+    msg_logger = MessageLogger(opt, current_iter=0, tb_logger=tb_logger)
 
-    # create message logger (formatted outputs)
-    msg_logger = MessageLogger(opt, current_iter, tb_logger)
-
-    # dataloader prefetcher
+    # 数据加载器预取器
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
     if prefetch_mode is None or prefetch_mode == 'cpu':
         prefetcher = CPUPrefetcher(train_loader)
     elif prefetch_mode == 'cuda':
-        # 由于使用 CPU，强制使用 CPU 预取
-        #prefetch_mode = 'cpu'
-        #prefetcher = CPUPrefetcher(train_loader)
         prefetcher = CUDAPrefetcher(train_loader, opt)
         logger.info(f'Use {prefetch_mode} prefetch dataloader')
         if opt['datasets']['train'].get('pin_memory') is not True:
             raise ValueError('Please set pin_memory=True for CUDAPrefetcher.')
     else:
-        raise ValueError(f'Wrong prefetch_mode {prefetch_mode}.'
-                         "Supported ones are: None, 'cuda', 'cpu'.")
+        raise ValueError(f'Wrong prefetch_mode {prefetch_mode}. Supported ones are: None, "cuda", "cpu".')
 
-    # training
-    logger.info(
-        f'Start training from epoch: {start_epoch}, iter: {current_iter}')
+    # 训练
+    logger.info(f'Start training from epoch: {start_epoch}, iter: {current_iter}')
     data_time, iter_time = time.time(), time.time()
     start_time = time.time()
-    best_psnr = -36.9
-
-    # 计算每个 epoch 的迭代次数和总 epoch 数
-    num_iter_per_epoch = math.ceil(
-        len(train_loader.dataset) * opt['datasets']['train'].get('dataset_enlarge_ratio', 1) /
-        (opt['datasets']['train']['batch_size_per_gpu'] * opt['world_size']))
-    total_epochs = math.ceil(total_iters / num_iter_per_epoch)
 
     # 训练循环
     for epoch in range(start_epoch, total_epochs):
@@ -279,17 +235,11 @@ def main():
             current_iter += 1
             if current_iter > total_iters:
                 break
-            # update learning rate
-            model.update_learning_rate(
-                current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
-            # training
-            # 将数据移动到 CPU
-            # for key in train_data:
-            #     if isinstance(train_data[key], torch.Tensor):
-            #         train_data[key] = train_data[key].to(torch.device('cpu'))
-            #     elif isinstance(train_data[key], list):
-            #         train_data[key] = [item.to(torch.device('cpu')) if isinstance(item, torch.Tensor) else item for item in train_data[key]]
-            # 根据设备设置（CPU 或 GPU）移动数据
+
+            # 更新学习率
+            model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+
+            # 将数据移动到正确的设备
             device = torch.device(opt['device'])
             for key in train_data:
                 if isinstance(train_data[key], torch.Tensor):
@@ -300,32 +250,24 @@ def main():
 
             result_code = model.optimize_parameters(current_iter, tb_logger)
             iter_time = time.time() - iter_time
-            # log
+
+            # 记录日志
             if current_iter % opt['logger']['print_freq'] == 0:
                 log_vars = {'epoch': epoch, 'iter': current_iter, 'total_iter': total_iters}
                 log_vars.update({'lrs': model.get_current_learning_rate()})
                 log_vars.update({'time': iter_time, 'data_time': data_time})
                 log_vars.update(model.get_current_log())
                 msg_logger(log_vars)
-            # 保存最好的loss
+
+            # 保存模型和训练状态
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
                 logger.info('Saving models and training states.')
                 model.save(epoch, current_iter)
 
-            # validation
+            # 验证
             if opt.get('val') is not None and (current_iter % opt['val']['val_freq'] == 0):
                 rgb2bgr = opt['val'].get('rgb2bgr', True)
                 use_image = opt['val'].get('use_image', True)
-                # 将验证数据移动到 CPU
-                # for i in range(len(val_loader.dataset)):
-                #     for key in val_loader.dataset[i]:
-                #         if isinstance(val_loader.dataset[i][key], torch.Tensor):
-                #             val_loader.dataset[i][key] = val_loader.dataset[i][key].to(torch.device('cpu'))
-                #         elif isinstance(val_loader.dataset[i][key], list):
-                #             val_loader.dataset[i][key] = [item.to(torch.device('cpu')) if isinstance(item, torch.Tensor) else item for item in val_loader.dataset[i][key]]
-
-                # model.validation(val_loader, current_iter, tb_logger,
-                #              opt['val']['save_img'], rgb2bgr, use_image)
                 log_vars = {'epoch': epoch, 'iter': current_iter, 'total_iter': total_iters}
                 log_vars.update({'lrs': model.get_current_learning_rate()})
                 log_vars.update(model.get_current_log())
@@ -335,27 +277,18 @@ def main():
             iter_time = time.time()
             train_data = prefetcher.next()
 
-        # end of iter
+        # 结束迭代
         logger.info(f'End of epoch {epoch + 1}/{total_epochs}.')
         epoch += 1
 
-    # end of epoch
-
-    consumed_time = str(
-        datetime.timedelta(seconds=int(time.time() - start_time)))
+    # 结束训练
+    consumed_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
     logger.info(f'End of training. Time consumed: {consumed_time}')
     logger.info('Save the latest model.')
-    model.save(epoch=-1, current_iter=-1)  # -1 stands for the latest
+    model.save(epoch=-1, current_iter=-1)  # -1 表示最新模型
     if opt.get('val') is not None:
         rgb2bgr = opt['val'].get('rgb2bgr', True)
         use_image = opt['val'].get('use_image', True)
-        # 将验证数据移动到 CPU
-        # for i in range(len(val_loader.dataset)):
-        #     for key in val_loader.dataset[i]:
-        #         if isinstance(val_loader.dataset[i][key], torch.Tensor):
-        #             val_loader.dataset[i][key] = val_loader.dataset[i][key].to(torch.device('cpu'))
-        #         elif isinstance(val_loader.dataset[i][key], list):
-        #             val_loader.dataset[i][key] = [item.to(torch.device('cpu')) if isinstance(item, torch.Tensor) else item for item in val_loader.dataset[i][key]]  
         metric = model.validation(val_loader, current_iter, tb_logger,
                                   opt['val']['save_img'], rgb2bgr, use_image)
     if tb_logger:
