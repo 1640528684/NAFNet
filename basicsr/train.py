@@ -296,6 +296,12 @@ def main():
                     train_data[key] = [item.to(device) if isinstance(item, torch.Tensor) else item for item in train_data[key]]
             model.feed_data(train_data, is_val=False)
 
+            # 调用 feed_data 方法
+            if hasattr(model, 'module'):
+                model.module.feed_data(train_data, is_val=False)
+            else:
+                model.feed_data(train_data, is_val=False)
+
             result_code = model.optimize_parameters(current_iter, tb_logger)
             iter_time = time.time() - iter_time
 
