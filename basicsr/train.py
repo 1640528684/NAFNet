@@ -204,7 +204,7 @@ def main():
     train_loader, train_sampler, val_loader, total_epochs, total_iters = result
 
     # 创建消息记录器（格式化输出）
-    msg_logger = MessageLogger(opt, current_iter=0, tb_logger=tb_logger)
+    msg_logger = MessageLogger(opt,tb_logger=tb_logger)
 
     # 数据加载器预取器
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
