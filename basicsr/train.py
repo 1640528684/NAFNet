@@ -294,7 +294,6 @@ def main():
                     train_data[key] = train_data[key].to(device)
                 elif isinstance(train_data[key], list):
                     train_data[key] = [item.to(device) if isinstance(item, torch.Tensor) else item for item in train_data[key]]
-            model.feed_data(train_data, is_val=False)
 
             # 调用 feed_data 方法
             if hasattr(model, 'module'):
