@@ -104,6 +104,17 @@ class ImageRestorationModel(BaseModel):
             raise NotImplementedError(
                 f'optimizer {optim_type} is not supperted yet.')
         self.optimizers.append(self.optimizer_g)
+    
+    def setup_schedulers(self):
+        self.lr_schedulers = []  # 初始化 lr_schedulers
+        for optimizer in self.optimizers:
+            if 'lr_scheduler' in self.opt['train'] and self.opt['train']['lr_scheduler'].get('type'):
+                lr_scheduler_type = self.opt['train']['lr_scheduler'].pop('type')
+                if lr_scheduler_type == 'TrueCosineAnnealingLR':
+                    from torch.optim.lr_scheduler import CosineAnnealingLR
+                    self.lr_schedulers.append(
+                        CosineAnnealingLR(optimizer, **self.opt['train']['lr_scheduler'])
+                    )
 
     def update_learning_rate(self, current_iter, warmup_iter=-1):
         # 在这里定义 update_learning_rate 方法
