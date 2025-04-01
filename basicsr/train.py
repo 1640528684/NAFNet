@@ -236,8 +236,12 @@ def main():
             if current_iter > total_iters:
                 break
 
+            
             # 更新学习率
-            model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            if hasattr(model, 'module'):
+                model.module.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            else:
+                model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
 
             # 将数据移动到正确的设备
             device = torch.device(opt['device'])
