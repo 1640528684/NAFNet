@@ -18,8 +18,8 @@ datasets:
     name: gopro-test
     type: PairedImageDataset
 
-    dataroot_gt: ./datasets/GoPro/test/target.lmdb
-    dataroot_lq: ./datasets/GoPro/test/input.lmdb
+    dataroot_gt: ../datasets/GoPro/test/target.lmdb
+    dataroot_lq: ../datasets/GoPro/test/input.lmdb
 
     #max_dataset_size: 10  
 
