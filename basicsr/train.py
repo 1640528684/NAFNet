@@ -170,8 +170,10 @@ def main():
         init_dist(opt['launcher'], **opt['dist_params'])
     else:
         opt['rank'], opt['world_size'] = 0, 1
-
-
+    
+    # 初始化变量
+    start_epoch = 0
+    current_iter = 0
     #torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
 
@@ -189,24 +191,58 @@ def main():
     # except:
     #     states = []
 
-    # 创建模型
-    model = create_model(opt)
+    # automatic resume ..
+    state_folder_path = os.path.join(current_dir, 'experiments', opt['name'], 'training_states')  # 修改为动态路径
+    try:
+        states = os.listdir(state_folder_path)
+    except:
+        states = []
 
-    # 如果有多个 GPU，使用 DataParallel 包装模型
-    if opt['num_gpu'] > 1:
-        model.net_g = torch.nn.DataParallel(model.net_g)
+    resume_state = None
+    if len(states) > 0:
+        print('!!!!!! resume state .. ', states, state_folder_path)
+        max_state_file = '{}.state'.format(max([int(x[0:-6]) for x in states]))
+        resume_state = os.path.join(state_folder_path, max_state_file)
+        opt['path']['resume_state'] = resume_state
 
-    # 初始化日志记录器
+    # load resume states if necessary
+    if opt['path'].get('resume_state'):
+        resume_state = torch.load(opt['path']['resume_state'], map_location=torch.device('cpu'))
+    else:
+        resume_state = None
+
+    # mkdir for experiments and logger
+    if resume_state is None:
+        make_exp_dirs(opt)
+        if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name'] and opt['rank'] == 0:
+            mkdir_and_rename(osp.join('tb_logger', opt['name']))
+
+    # initialize loggers
     logger, tb_logger = init_loggers(opt)
 
-    # 创建训练和验证数据加载器
+    # create train and validation dataloaders
     result = create_train_val_dataloader(opt, logger)
     train_loader, train_sampler, val_loader, total_epochs, total_iters = result
 
-    # 创建消息记录器（格式化输出）
-    msg_logger = MessageLogger(opt,tb_logger=tb_logger)
+    # create model
+    if resume_state:  # resume training
+        check_resume(opt, resume_state['iter'])
+        model = create_model(opt)
+        if opt['num_gpu'] > 1:
+            model = torch.nn.DataParallel(model)
+        model.resume_training(resume_state)  # handle optimizers and schedulers
+        logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
+        start_epoch = resume_state.get('epoch', 0)
+        current_iter = resume_state.get('iter', 0)
+    else:
+        model = create_model(opt)
+        if opt['num_gpu'] > 1:
+            model = torch.nn.DataParallel(model)
 
-    # 数据加载器预取器
+    # create message logger (formatted outputs)
+    msg_logger = MessageLogger(opt, tb_logger=tb_logger)
+
+    # dataloader prefetcher
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
     if prefetch_mode is None or prefetch_mode == 'cpu':
         prefetcher = CPUPrefetcher(train_loader)
@@ -218,10 +254,17 @@ def main():
     else:
         raise ValueError(f'Wrong prefetch_mode {prefetch_mode}. Supported ones are: None, "cuda", "cpu".')
 
-    # 训练
+    # training
     logger.info(f'Start training from epoch: {start_epoch}, iter: {current_iter}')
     data_time, iter_time = time.time(), time.time()
     start_time = time.time()
+    best_psnr = -36.9
+
+    # 计算每个 epoch 的迭代次数和总 epoch 数
+    num_iter_per_epoch = math.ceil(
+        len(train_loader.dataset) * opt['datasets']['train'].get('dataset_enlarge_ratio', 1) /
+        (opt['datasets']['train']['batch_size_per_gpu'] * opt['world_size']))
+    total_epochs = math.ceil(total_iters / num_iter_per_epoch)
 
     # 训练循环
     for epoch in range(start_epoch, total_epochs):
@@ -236,12 +279,8 @@ def main():
             if current_iter > total_iters:
                 break
 
-            
             # 更新学习率
-            if hasattr(model, 'module'):
-                model.module.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
-            else:
-                model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
+            model.update_learning_rate(current_iter, warmup_iter=opt['train'].get('warmup_iter', -1))
 
             # 将数据移动到正确的设备
             device = torch.device(opt['device'])
