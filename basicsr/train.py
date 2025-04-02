@@ -168,8 +168,6 @@ def main():
     else:
         opt['rank'], opt['world_size'] = 0, 1
 
-
-    #修改点2
     state_folder_path = os.path.join(current_dir, 'experiments', opt['name'], 'training_states')  # 修改为动态路径
     
     try:
@@ -211,6 +209,8 @@ def main():
         model = create_model(opt)
         if opt['num_gpu'] > 1:
             model = torch.nn.DataParallel(model)
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
         model.resume_training(resume_state)  # handle optimizers and schedulers
         logger.info(f"Resuming training from epoch: {resume_state['epoch']}, "
                     f"iter: {resume_state['iter']}.")
@@ -220,6 +220,8 @@ def main():
         model = create_model(opt)
         if opt['num_gpu'] > 1:
             model = torch.nn.DataParallel(model)
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
         start_epoch = 0
         current_iter = 0
 
