@@ -19,19 +19,24 @@ datasets:
     type: PairedImageDataset
     dataroot_gt: ../datasets/GoPro/train/target
     dataroot_lq: ../datasets/GoPro/train/input
-
     filename_tmpl: '{}'
     io_backend:
       type: disk
-
     gt_size: 256
     use_flip: true
     use_rot: true
 
     # data loader batch_size_per_gpu: 5 total_iter: 640000
+    # use_shuffle: true
+    # num_worker_per_gpu: 4
+    # batch_size_per_gpu: 5
+    # dataset_enlarge_ratio: 1
+    # prefetch_mode: ~
+    # 数据加载器配置
+    batch_size_per_gpu: 5
+    total_iter: 640000
     use_shuffle: true
     num_worker_per_gpu: 4
-    batch_size_per_gpu: 5
     dataset_enlarge_ratio: 1
     prefetch_mode: ~
 
@@ -43,6 +48,8 @@ datasets:
     dataroot_lq: ../datasets/GoPro/test/input.lmdb
     io_backend:
       type: lmdb
+    # 修正验证频率
+    val_freq: 10000
 
 
 network_g:
@@ -57,13 +64,15 @@ path:
   pretrain_network_g: ~
   strict_load_g: true
   resume_state: ~
+  best_state: experiments/NAFNet-GoPro-width64/best_model.pth  # 新增最佳模型路径
 
 # training settings
 train:
   optim_g:
     type: AdamW
-    lr: !!float 1e-3
-    weight_decay: !!float 1e-3
+    lr: !!float 1e-4  #1e-3
+    weight_decay: !!float 1e-8  #1e-3
+    clip_grid_norm: 0.1
     betas: [0.9, 0.9]
 
   scheduler:
@@ -75,17 +84,23 @@ train:
   warmup_iter: -1 # no warm up
 
   # losses
-  pixel_opt:
-    type: PSNRLoss
-    loss_weight: 1
-    reduction: mean
+  # pixel_opt:
+  #   type: PSNRLoss
+  #   loss_weight: 1
+  #   reduction: mean
+  losses:
+    pixel_opt:
+      type: SmoothL1Loss  # 替换为 SmoothL1
+      loss_weight: 0.5    # 调整权重
+    vgg_opt:
+      type: MSELoss       # VGG 感知损失
+      loss_weight: 0.5    # 调整权重
+      #layer_weights: [1.0]  # 可选：指定 VGG 特征层的权重
 
 # validation settings
 val:
-  val_freq: !!float 2e6
+  val_freq: !!float 10000 #2e6
   save_img: false #false，默认不保存
-
-
   metrics:
     psnr: # metric name, can be arbitrary
       type: calculate_psnr
@@ -99,7 +114,7 @@ val:
 # logging settings
 logger:
   print_freq: 200
-  save_checkpoint_freq: !!float 5e3
+  save_checkpoint_freq: !!float 5000 #5e3
   use_tb_logger: true
   wandb:
     project: ~
