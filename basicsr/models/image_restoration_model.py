@@ -30,7 +30,6 @@ class ImageRestorationModel(BaseModel):
         # define network
         self.net_g = define_network(deepcopy(opt['network_g']))
         self.net_g = self.model_to_device(self.net_g)
-        self.net_g = self.net_g.to(self.device)  # 确保模型在正确的设备上
 
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
@@ -94,21 +93,6 @@ class ImageRestorationModel(BaseModel):
             raise NotImplementedError(
                 f'optimizer {optim_type} is not supported yet.')
         self.optimizers.append(self.optimizer_g)
-    
-    def setup_schedulers(self):
-        self.lr_schedulers = []  # 初始化 lr_schedulers
-        for optimizer in self.optimizers:
-            if 'lr_scheduler' in self.opt['train'] and self.opt['train']['lr_scheduler'].get('type'):
-                lr_scheduler_type = self.opt['train']['lr_scheduler'].pop('type')
-                if lr_scheduler_type == 'TrueCosineAnnealingLR':
-                    from torch.optim.lr_scheduler import CosineAnnealingLR
-                    self.lr_schedulers.append(
-                        CosineAnnealingLR(optimizer, **self.opt['train']['lr_scheduler'])
-                    )
-
-    def update_learning_rate(self, current_iter, warmup_iter=-1):
-        for scheduler in self.lr_schedulers:  
-            scheduler.step()
 
     def feed_data(self, data, is_val=False):
         self.lq = data['lq'].to(self.device)
@@ -145,7 +129,7 @@ class ImageRestorationModel(BaseModel):
         parts = []
         idxes = []
 
-        i = 0  
+        i = 0  # 0~h-1
         last_i = False
         while i < h and not last_i:
             j = 0
@@ -194,7 +178,7 @@ class ImageRestorationModel(BaseModel):
         self.output = (preds / count_mt).to(self.device)
         self.lq = self.origin_lq
 
-    def optimize_parameters(self, current_iter, tb_logger):
+    def optimize_parameters(self, current_iter, tb_logger=None):
         self.optimizer_g.zero_grad()
 
         if self.opt['train'].get('mixup', False):
@@ -226,15 +210,31 @@ class ImageRestorationModel(BaseModel):
                 l_total += l_style
                 loss_dict['l_style'] = l_style
 
+        # 添加一个小的 epsilon 值，避免数值不稳定
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
 
         l_total.backward()
+
+        # 检查梯度
+        for name, param in self.net_g.named_parameters():
+            if param.grad is not None:
+                print(f"Gradient of {name}: mean={param.grad.mean().item()}, std={param.grad.std().item()}")
+                # 检查梯度是否为 nan
+                if torch.isnan(param.grad).any():
+                    print(f"Gradient of {name} contains nan values.")
+
         use_grad_clip = self.opt['train'].get('use_grad_clip', True)
         if use_grad_clip:
             torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
+
         self.optimizer_g.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
+
+        # 使用 tb_logger 记录日志
+        if tb_logger is not None:
+            for key, value in self.log_dict.items():
+                tb_logger.add_scalar(f'train/{key}', value, current_iter)
 
     def test(self):
         self.net_g.eval()
@@ -257,13 +257,7 @@ class ImageRestorationModel(BaseModel):
         self.net_g.train()
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        if not torch.distributed.is_initialized():
-            self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
-            return
-        if isinstance(dataloader.dataset, torch.utils.data.Subset):
-            dataset_name = dataloader.dataset.dataset.opt['name']
-        else:
-            dataset_name = dataloader.dataset.opt['name']
+        dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
         if with_metrics:
             self.metric_results = {
@@ -298,6 +292,7 @@ class ImageRestorationModel(BaseModel):
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
                 del self.gt
 
+            # tentative for out of GPU memory
             del self.lq
             del self.output
             torch.cuda.empty_cache()
@@ -381,92 +376,10 @@ class ImageRestorationModel(BaseModel):
                                                tb_logger, metrics_dict)
         return 0.
 
-    def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
-
-    def _run_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        if isinstance(dataloader.dataset, torch.utils.data.Subset):
-            dataset_name = dataloader.dataset.dataset.opt['name']
-        else:
-            dataset_name = dataloader.dataset.opt['name']
-        with_metrics = self.opt['val'].get('metrics') is not None
-        if with_metrics:
-            self.metric_results = {
-                metric: 0
-                for metric in self.opt['val']['metrics'].keys()
-            }
-
-        cnt = 0
-
-        for idx, val_data in enumerate(dataloader):
-            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
-
-            self.feed_data(val_data, is_val=True)
-            if self.opt['val'].get('grids', False):
-                self.grids()
-
-            self.test()
-
-            if self.opt['val'].get('grids', False):
-                self.grids_inverse()
-
-            visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
-                del self.gt
-
-            del self.lq
-            del self.output
-            torch.cuda.empty_cache()
-
-            if save_img:
-                if sr_img.shape[2] == 6:
-                    L_img = sr_img[:, :, :3]
-                    R_img = sr_img[:, :, 3:]
-
-                    visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
-                    imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
-                    imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
-                else:
-                    if self.opt['is_train']:
-                        save_img_path = osp.join(self.opt['path']['visualization'],
-                                                 img_name,
-                                                 f'{img_name}_{current_iter}.png')
-                        save_gt_img_path = osp.join(self.opt['path']['visualization'],
-                                                    img_name,
-                                                    f'{img_name}_{current_iter}_gt.png')
-                    else:
-                        save_img_path = osp.join(
-                            self.opt['path']['visualization'], dataset_name,
-                            f'{img_name}.png')
-                        save_gt_img_path = osp.join(
-                            self.opt['path']['visualization'], dataset_name,
-                            f'{img_name}_gt.png')
-
-                    imwrite(sr_img, save_img_path)
-                    imwrite(gt_img, save_gt_img_path)
-
-            if with_metrics:
-                opt_metric = deepcopy(self.opt['val']['metrics'])
-                if use_image:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
-                        self.metric_results[name] += getattr(
-                            metric_module, metric_type)(sr_img, gt_img, **opt_)
-                else:
-                    for name, opt_ in opt_metric.items():
-                        metric_type = opt_.pop('type')
-                        self.metric_results[name] += getattr(
-                            metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
-
-            cnt += 1
-
-        if with_metrics:
-            metrics_dict = {}
-            for metric in self.metric_results.keys():
-                metrics_dict[metric] = self.metric_results[metric] / cnt
-            self._log_validation_metric_values(current_iter, dataset_name, tb_logger, metrics_dict)
+    def nondist_validation(self, *args, **kwargs):
+        logger = get_root_logger()
+        logger.warning('nondist_validation is not implemented. Run dist_validation.')
+        self.dist_validation(*args, **kwargs)
 
     def _log_validation_metric_values(self, current_iter, dataset_name,
                                       tb_logger, metric_dict):
