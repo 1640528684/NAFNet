@@ -89,13 +89,18 @@ train:
   #   loss_weight: 1
   #   reduction: mean
   losses:
-    pixel_opt:
+    pixel:
       type: SmoothL1Loss  # 替换为 SmoothL1
       loss_weight: 0.5    # 调整权重
-    vgg_opt:
-      type: MSELoss       # VGG 感知损失
-      loss_weight: 0.5    # 调整权重
-      #layer_weights: [1.0]  # 可选：指定 VGG 特征层的权重
+    perceptual:
+      type: PerceptualLoss
+      layer_name: 'relu3_3'
+      vgg_type: 'vgg19'
+      criterion: 'l1'
+    # vgg_opt:
+    #   type: MSELoss       # VGG 感知损失
+    #   loss_weight: 0.5    # 调整权重
+    #   #layer_weights: [1.0]  # 可选：指定 VGG 特征层的权重
 
 # validation settings
 val:
