@@ -236,6 +236,7 @@ class ImageRestorationModel(BaseModel):
 
         l_total.backward()
 
+        # 梯度裁剪
         if 'clip_grad_norm' in self.train_opt and self.train_opt['clip_grad_norm'] > 0:
             torch.nn.utils.clip_grad_norm_(
                 self.net_g.parameters(),
