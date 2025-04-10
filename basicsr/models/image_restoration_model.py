@@ -190,6 +190,9 @@ class ImageRestorationModel(BaseModel):
         self.lq = self.origin_lq
 
     def optimize_parameters(self, current_iter, tb_logger):
+        if not hasattr(self, 'train_opt') or 'train' not in self.train_opt:
+            raise ValueError("self.train_opt does not exist or does not contain 'train' key.")
+
         self.optimizer_g.zero_grad()
 
         if self.train_opt['train'].get('mixup', False):

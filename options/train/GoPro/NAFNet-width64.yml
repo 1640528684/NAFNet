@@ -48,6 +48,8 @@ path:
 
 # training settings
 train:
+  train:
+    mixup: false
   optim_g:
     type: AdamW
     lr: !!float 1e-4
