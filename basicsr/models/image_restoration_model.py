@@ -89,15 +89,18 @@ class ImageRestorationModel(BaseModel):
         # 获取当前优化器支持的有效参数列表
         valid_params_list = valid_params_dict.get(optim_type, [])
 
-        # 显式移除 clip_grid_norm 参数
-        if 'clip_grid_norm' in train_opt['optim_g']:
-            train_opt['optim_g'].pop('clip_grid_norm')  # 移除无效参数
+        # 显式移除无效参数
+        invalid_keys = []
+        for key in train_opt['optim_g'].keys():
+            if key not in valid_params_list:
+                invalid_keys.append(key)
+                train_opt['optim_g'].pop(key)  # 移除无效参数
+
+        if invalid_keys:
+            print(f"Removed invalid optimizer parameters: {invalid_keys}")
 
         # 定义优化器支持的参数
-        valid_params = {
-            k: v for k, v in train_opt['optim_g'].items()
-            if k in valid_params_list  # 只保留有效参数
-        }
+        valid_params = train_opt['optim_g']
 
         # 打印传递给优化器的参数
         print(f"Parameters passed to optimizer: {valid_params}")

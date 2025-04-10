@@ -72,7 +72,7 @@ train:
     type: AdamW
     lr: !!float 1e-4  #1e-3
     weight_decay: !!float 1e-8  #1e-3
-    clip_grid_norm: 0.1
+    #clip_grid_norm: 0.1
     betas: [0.9, 0.9]
 
   scheduler:
