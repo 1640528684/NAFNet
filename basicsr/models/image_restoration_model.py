@@ -85,11 +85,17 @@ class ImageRestorationModel(BaseModel):
         }
         # 获取当前优化器支持的有效参数列表
         valid_params_list = valid_params_dict.get(optim_type, [])
-        # 定义 AdamW 支持的参数列表
+        # 显式移除 clip_grid_norm 参数
+        if 'clip_grid_norm' in train_opt['optim_g']:
+            train_opt['optim_g'].pop('clip_grid_norm')
+        # 定义优化器支持的参数
         valid_params = {
             k: v for k, v in train_opt['optim_g'].items()
             if k in valid_params_list  # ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
         }
+
+        # 打印传递给优化器的参数
+        print(f"Parameters passed to optimizer: {valid_params}")
 
         if optim_type == 'Adam':
             self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
