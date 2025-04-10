@@ -240,7 +240,7 @@ class ImageRestorationModel(BaseModel):
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
         # 添加学习率到 log_dict
-        self.log_dict['lrs'] = self.get_current_learning_rate()
+        self.log_dict['lrs'] = [self.get_current_learning_rate()]  # 确保是列表
     
     def reduce_loss_dict(self, loss_dict):
         """Reduce loss dict.
