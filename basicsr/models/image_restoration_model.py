@@ -87,7 +87,7 @@ class ImageRestorationModel(BaseModel):
         valid_params_list = valid_params_dict.get(optim_type, [])
         # 显式移除 clip_grid_norm 参数
         if 'clip_grid_norm' in train_opt['optim_g']:
-            train_opt['optim_g'].pop('clip_grid_norm')
+             train_opt['optim_g'].pop('clip_grid_norm')
         # 定义优化器支持的参数
         valid_params = {
             k: v for k, v in train_opt['optim_g'].items()
