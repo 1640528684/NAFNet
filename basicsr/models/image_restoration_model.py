@@ -39,24 +39,24 @@ class ImageRestorationModel(BaseModel):
 
     def init_training_settings(self):
         self.net_g.train()
-        train_opt = self.opt['train']
+        self.train_opt = self.opt['train']
 
         # 定义像素损失，默认使用 L1Loss
-        if train_opt.get('pixel_opt'):
-            pixel_type = train_opt['pixel_opt'].pop('type')
+        if self.train_opt.get('pixel_opt'):
+            pixel_type = self.train_opt['pixel_opt'].pop('type')
             cri_pix_cls = getattr(loss_module, pixel_type)
-            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(self.device)
+            self.cri_pix = cri_pix_cls(**self.train_opt['pixel_opt']).to(self.device)
         else:
             # 如果没有定义 pixel_opt，则使用默认的 L1Loss
             from basicsr.models.losses import L1Loss
             self.cri_pix = L1Loss(loss_weight=1.0).to(self.device)
 
         # 定义感知损失，默认不启用
-        if train_opt.get('perceptual_opt'):
-            percep_type = train_opt['perceptual_opt'].pop('type')
+        if self.train_opt.get('perceptual_opt'):
+            percep_type = self.train_opt['perceptual_opt'].pop('type')
             cri_perceptual_cls = getattr(loss_module, percep_type)
             self.cri_perceptual = cri_perceptual_cls(
-                **train_opt['perceptual_opt']).to(self.device)
+                **self.train_opt['perceptual_opt']).to(self.device)
         else:
             self.cri_perceptual = None
 
@@ -77,11 +77,22 @@ class ImageRestorationModel(BaseModel):
                 optim_params.append(v)
 
         optim_type = train_opt['optim_g'].pop('type')
-        # ✅ 过滤无效参数（如 clip_grid_norm）
+        # 定义有效的优化器参数
+        valid_params_dict = {
+            'Adam': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad'],
+            'SGD': ['lr', 'momentum', 'dampening', 'weight_decay', 'nesterov'],
+            'AdamW': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+        }
+        # 获取当前优化器支持的有效参数列表
+        valid_params_list = valid_params_dict.get(optim_type, [])
+        # 定义优化器支持的参数
         valid_params = {
             k: v for k, v in train_opt['optim_g'].items()
-            if k in ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+            if k in valid_params_list  # ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
         }
+
+        # 打印传递给优化器的参数（调试信息）
+        print(f"Parameters passed to optimizer: {valid_params}")
 
         if optim_type == 'Adam':
             self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
@@ -181,7 +192,7 @@ class ImageRestorationModel(BaseModel):
     def optimize_parameters(self, current_iter, tb_logger):
         self.optimizer_g.zero_grad()
 
-        if self.opt['train'].get('mixup', False):
+        if self.train_opt['train'].get('mixup', False):
             self.mixup_aug()
 
         preds = self.net_g(self.lq)
@@ -215,11 +226,10 @@ class ImageRestorationModel(BaseModel):
 
         l_total.backward()
 
-        # ✅ 正确添加梯度裁剪（根据配置）
-        if 'clip_grad_norm' in train_opt and train_opt['clip_grad_norm'] > 0:
+        if 'clip_grad_norm' in self.train_opt and self.train_opt['clip_grad_norm'] > 0:
             torch.nn.utils.clip_grad_norm_(
                 self.net_g.parameters(),
-                max_norm=train_opt['clip_grad_norm'],
+                max_norm=self.train_opt['clip_grad_norm'],
                 norm_type=2.0
             )
 
