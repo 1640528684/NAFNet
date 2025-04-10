@@ -87,6 +87,14 @@ class ImageRestorationModel(BaseModel):
         elif optim_type == 'AdamW':
             self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
                                                  **train_opt['optim_g'])
+        elif optim_type == 'AdamW':
+        # 过滤掉不支持的参数
+            valid_params = {
+                k: v for k, v in train_opt['optim_g'].items()
+                if k in ['lr', 'betas', 'eps', 'weight_decay']
+            }
+            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
+                                             **valid_params)
         else:
             raise NotImplementedError(
                 f'optimizer {optim_type} is not supported yet.')
