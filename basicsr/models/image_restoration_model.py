@@ -69,24 +69,26 @@ class ImageRestorationModel(BaseModel):
         self.setup_schedulers()
 
     def setup_optimizers(self):
-        self.train_opt = self.opt['train']
+        train_opt = self.opt['train']
         optim_params = []
 
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
                 optim_params.append(v)
 
-        optim_type = self.train_opt['optim_g'].pop('type')
-         # 定义有效的优化器参数
-        valid_optimizer_params = {
+        optim_type = train_opt['optim_g'].pop('type')
+        # 定义有效的优化器参数
+        valid_params_dict = {
             'Adam': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad'],
             'SGD': ['lr', 'momentum', 'dampening', 'weight_decay', 'nesterov'],
             'AdamW': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
         }
+        # 获取当前优化器支持的有效参数列表
+        valid_params_list = valid_params_dict.get(optim_type, [])
         # 定义 AdamW 支持的参数列表
         valid_params = {
-            k: v for k, v in self.train_opt['optim_g'].items()
-            if k in valid_optimizer_params.get(optim_type, []) #['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+            k: v for k, v in train_opt['optim_g'].items()
+            if k in valid_params_list #['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
         }
 
         if optim_type == 'Adam':
