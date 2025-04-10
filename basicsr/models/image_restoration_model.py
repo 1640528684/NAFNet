@@ -188,14 +188,14 @@ class ImageRestorationModel(BaseModel):
 
         self.output = (preds / count_mt).to(self.device)
         self.lq = self.origin_lq
+        
+    def get_current_learning_rate(self):
+        return self.optimizer_g.param_groups[0]['lr']
 
     def optimize_parameters(self, current_iter, tb_logger):
-        if not hasattr(self, 'train_opt') or 'train' not in self.train_opt:
-            raise ValueError("self.train_opt does not exist or does not contain 'train' key.")
-
         self.optimizer_g.zero_grad()
 
-        if self.train_opt['train'].get('mixup', False):
+        if hasattr(self, 'train_opt') and self.train_opt.get('mixup', False):
             self.mixup_aug()
 
         preds = self.net_g(self.lq)
@@ -229,7 +229,7 @@ class ImageRestorationModel(BaseModel):
 
         l_total.backward()
 
-        if 'clip_grad_norm' in self.train_opt and self.train_opt['clip_grad_norm'] > 0:
+        if hasattr(self, 'train_opt') and 'clip_grad_norm' in self.train_opt and self.train_opt['clip_grad_norm'] > 0:
             torch.nn.utils.clip_grad_norm_(
                 self.net_g.parameters(),
                 max_norm=self.train_opt['clip_grad_norm'],
@@ -239,6 +239,27 @@ class ImageRestorationModel(BaseModel):
         self.optimizer_g.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
+        # 添加学习率到 log_dict
+        self.log_dict['lrs'] = self.get_current_learning_rate()
+    
+    def reduce_loss_dict(self, loss_dict):
+        """Reduce loss dict.
+
+        In distributed training, it averages the losses among different GPUs.
+
+        Args:
+            loss_dict (OrderedDict): Loss dict.
+        """
+        reduced_loss_dict = {}
+        with torch.no_grad():
+            if self.opt['num_gpu'] > 1:
+                for key in loss_dict:
+                    reduced_loss_dict[key] = loss_dict[key].mean().item()
+            else:
+                for key in loss_dict:
+                    reduced_loss_dict[key] = loss_dict[key].item()
+
+        return reduced_loss_dict
 
     def test(self):
         self.net_g.eval()
