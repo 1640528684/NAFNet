@@ -14,7 +14,6 @@ from basicsr.utils.dist_util import get_dist_info
 loss_module = importlib.import_module('basicsr.models.losses')
 metric_module = importlib.import_module('basicsr.metrics')
 
-
 class ImageRestorationModel(BaseModel):
     """Base Deblur model for single image deblur."""
 
@@ -40,24 +39,24 @@ class ImageRestorationModel(BaseModel):
 
     def init_training_settings(self):
         self.net_g.train()
-        train_opt = self.opt['train']
+        self.train_opt = self.opt['train']
 
         # 定义像素损失，默认使用 L1Loss
-        if train_opt.get('pixel_opt'):
-            pixel_type = train_opt['pixel_opt'].pop('type')
+        if self.train_opt.get('pixel_opt'):
+            pixel_type = self.train_opt['pixel_opt'].pop('type')
             cri_pix_cls = getattr(loss_module, pixel_type)
-            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(self.device)
+            self.cri_pix = cri_pix_cls(**self.train_opt['pixel_opt']).to(self.device)
         else:
             # 如果没有定义 pixel_opt，则使用默认的 L1Loss
             from basicsr.models.losses import L1Loss
             self.cri_pix = L1Loss(loss_weight=1.0).to(self.device)
 
         # 定义感知损失，默认不启用
-        if train_opt.get('perceptual_opt'):
-            percep_type = train_opt['perceptual_opt'].pop('type')
+        if self.train_opt.get('perceptual_opt'):
+            percep_type = self.train_opt['perceptual_opt'].pop('type')
             cri_perceptual_cls = getattr(loss_module, percep_type)
             self.cri_perceptual = cri_perceptual_cls(
-                **train_opt['perceptual_opt']).to(self.device)
+                **self.train_opt['perceptual_opt']).to(self.device)
         else:
             self.cri_perceptual = None
 
@@ -70,34 +69,29 @@ class ImageRestorationModel(BaseModel):
         self.setup_schedulers()
 
     def setup_optimizers(self):
-        train_opt = self.opt['train']
+        self.train_opt = self.opt['train']
         optim_params = []
 
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
                 optim_params.append(v)
 
-        optim_type = train_opt['optim_g'].pop('type')
+        optim_type = self.train_opt['optim_g'].pop('type')
+        # 定义 AdamW 支持的参数列表
+        valid_params = {
+            k: v for k, v in self.train_opt['optim_g'].items()
+            if k in ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+        }
+
         if optim_type == 'Adam':
-            self.optimizer_g = torch.optim.Adam([{'params': optim_params}],
-                                                **train_opt['optim_g'])
+            self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
         elif optim_type == 'SGD':
-            self.optimizer_g = torch.optim.SGD(optim_params,
-                                               **train_opt['optim_g'])
+            self.optimizer_g = torch.optim.SGD(optim_params, **valid_params)
         elif optim_type == 'AdamW':
-            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
-                                                 **train_opt['optim_g'])
-        elif optim_type == 'AdamW':
-        # 过滤掉不支持的参数
-            valid_params = {
-                k: v for k, v in train_opt['optim_g'].items()
-                if k in ['lr', 'betas', 'eps', 'weight_decay']
-            }
-            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
-                                             **valid_params)
+            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}], **valid_params)
         else:
-            raise NotImplementedError(
-                f'optimizer {optim_type} is not supported yet.')
+            raise NotImplementedError(f'optimizer {optim_type} is not supported yet.')
+
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
@@ -187,7 +181,7 @@ class ImageRestorationModel(BaseModel):
     def optimize_parameters(self, current_iter, tb_logger):
         self.optimizer_g.zero_grad()
 
-        if self.opt['train'].get('mixup', False):
+        if self.train_opt['train'].get('mixup', False):
             self.mixup_aug()
 
         preds = self.net_g(self.lq)
@@ -220,9 +214,14 @@ class ImageRestorationModel(BaseModel):
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
 
         l_total.backward()
-        use_grad_clip = self.opt['train'].get('use_grad_clip', True)
-        if use_grad_clip:
-            torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
+
+        if 'clip_grad_norm' in self.train_opt and self.train_opt['clip_grad_norm'] > 0:
+            torch.nn.utils.clip_grad_norm_(
+                self.net_g.parameters(),
+                max_norm=self.train_opt['clip_grad_norm'],
+                norm_type=2.0
+            )
+
         self.optimizer_g.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
