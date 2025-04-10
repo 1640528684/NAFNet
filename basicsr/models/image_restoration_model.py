@@ -72,11 +72,14 @@ class ImageRestorationModel(BaseModel):
         train_opt = self.opt['train']
         optim_params = []
 
+        # 提取模型中需要优化的参数
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
                 optim_params.append(v)
 
+        # 获取优化器类型
         optim_type = train_opt['optim_g'].pop('type')
+
         # 定义有效的优化器参数
         valid_params_dict = {
             'Adam': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad'],
@@ -85,18 +88,21 @@ class ImageRestorationModel(BaseModel):
         }
         # 获取当前优化器支持的有效参数列表
         valid_params_list = valid_params_dict.get(optim_type, [])
+
         # 显式移除 clip_grid_norm 参数
         if 'clip_grid_norm' in train_opt['optim_g']:
-             train_opt['optim_g'].pop('clip_grid_norm')
+            train_opt['optim_g'].pop('clip_grid_norm')  # 移除无效参数
+
         # 定义优化器支持的参数
         valid_params = {
             k: v for k, v in train_opt['optim_g'].items()
-            if k in valid_params_list  # ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+            if k in valid_params_list  # 只保留有效参数
         }
 
         # 打印传递给优化器的参数
         print(f"Parameters passed to optimizer: {valid_params}")
 
+        # 根据优化器类型创建优化器
         if optim_type == 'Adam':
             self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
         elif optim_type == 'SGD':
@@ -106,6 +112,7 @@ class ImageRestorationModel(BaseModel):
         else:
             raise NotImplementedError(f'optimizer {optim_type} is not supported yet.')
 
+        # 将优化器添加到优化器列表
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
