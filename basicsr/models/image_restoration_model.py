@@ -77,10 +77,16 @@ class ImageRestorationModel(BaseModel):
                 optim_params.append(v)
 
         optim_type = self.train_opt['optim_g'].pop('type')
+         # 定义有效的优化器参数
+        valid_optimizer_params = {
+            'Adam': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad'],
+            'SGD': ['lr', 'momentum', 'dampening', 'weight_decay', 'nesterov'],
+            'AdamW': ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+        }
         # 定义 AdamW 支持的参数列表
         valid_params = {
             k: v for k, v in self.train_opt['optim_g'].items()
-            if k in ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+            if k in valid_optimizer_params.get(optim_type, []) #['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
         }
 
         if optim_type == 'Adam':
