@@ -1,9 +1,3 @@
-# ------------------------------------------------------------------------
-# Copyright (c) 2022 megvii-model. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from BasicSR (https://github.com/xinntao/BasicSR)
-# Copyright 2018-2020 BasicSR Authors
-# ------------------------------------------------------------------------
 import importlib
 import torch
 import torch.nn.functional as F
@@ -20,20 +14,18 @@ from basicsr.utils.dist_util import get_dist_info
 loss_module = importlib.import_module('basicsr.models.losses')
 metric_module = importlib.import_module('basicsr.metrics')
 
-
 class ImageRestorationModel(BaseModel):
     """Base Deblur model for single image deblur."""
 
     def __init__(self, opt):
         super(ImageRestorationModel, self).__init__(opt)
 
-        # define network
+        # 定义网络
         self.net_g = define_network(deepcopy(opt['network_g']))
         self.net_g = self.model_to_device(self.net_g)
         self.net_g = self.net_g.to(self.device)  # 确保模型在正确的设备上
 
-
-        # load pretrained models
+        # 加载预训练模型
         load_path = self.opt['path'].get('pretrain_network_g', None)
         if load_path is not None:
             self.load_network(self.net_g, load_path,
@@ -49,15 +41,17 @@ class ImageRestorationModel(BaseModel):
         self.net_g.train()
         train_opt = self.opt['train']
 
-        # define losses
+        # 定义像素损失，默认使用 L1Loss
         if train_opt.get('pixel_opt'):
             pixel_type = train_opt['pixel_opt'].pop('type')
             cri_pix_cls = getattr(loss_module, pixel_type)
-            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(
-                self.device)
+            self.cri_pix = cri_pix_cls(**train_opt['pixel_opt']).to(self.device)
         else:
-            self.cri_pix = None
+            # 如果没有定义 pixel_opt，则使用默认的 L1Loss
+            from basicsr.models.losses import L1Loss
+            self.cri_pix = L1Loss(loss_weight=1.0).to(self.device)
 
+        # 定义感知损失，默认不启用
         if train_opt.get('perceptual_opt'):
             percep_type = train_opt['perceptual_opt'].pop('type')
             cri_perceptual_cls = getattr(loss_module, percep_type)
@@ -66,10 +60,11 @@ class ImageRestorationModel(BaseModel):
         else:
             self.cri_perceptual = None
 
+        # 检查是否至少有一个损失函数被定义
         if self.cri_pix is None and self.cri_perceptual is None:
             raise ValueError('Both pixel and perceptual losses are None.')
 
-        # set up optimizers and schedulers
+        # 设置优化器和学习率调度器
         self.setup_optimizers()
         self.setup_schedulers()
 
@@ -79,30 +74,24 @@ class ImageRestorationModel(BaseModel):
 
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
-                #         if k.startswith('module.offsets') or k.startswith('module.dcns'):
-                #             optim_params_lowlr.append(v)
-                #         else:
                 optim_params.append(v)
-            # else:
-            #     logger = get_root_logger()
-            #     logger.warning(f'Params {k} will not be optimized.')
-        # print(optim_params)
-        # ratio = 0.1
 
         optim_type = train_opt['optim_g'].pop('type')
+        # ✅ 过滤无效参数（如 clip_grid_norm）
+        valid_params = {
+            k: v for k, v in train_opt['optim_g'].items()
+            if k in ['lr', 'betas', 'eps', 'weight_decay', 'amsgrad']
+        }
+
         if optim_type == 'Adam':
-            self.optimizer_g = torch.optim.Adam([{'params': optim_params}],
-                                                **train_opt['optim_g'])
+            self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
         elif optim_type == 'SGD':
-            self.optimizer_g = torch.optim.SGD(optim_params,
-                                               **train_opt['optim_g'])
+            self.optimizer_g = torch.optim.SGD(optim_params, **valid_params)
         elif optim_type == 'AdamW':
-            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
-                                                 **train_opt['optim_g'])
-            pass
+            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}], **valid_params)
         else:
-            raise NotImplementedError(
-                f'optimizer {optim_type} is not supperted yet.')
+            raise NotImplementedError(f'optimizer {optim_type} is not supported yet.')
+
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
@@ -126,7 +115,6 @@ class ImageRestorationModel(BaseModel):
             crop_size_w = int(self.opt['val'].get('crop_size_w_ratio') * w)
 
         crop_size_h, crop_size_w = crop_size_h // self.scale * self.scale, crop_size_w // self.scale * self.scale
-        # adaptive step_i, step_j
         num_row = (h - 1) // crop_size_h + 1
         num_col = (w - 1) // crop_size_w + 1
 
@@ -141,7 +129,7 @@ class ImageRestorationModel(BaseModel):
         parts = []
         idxes = []
 
-        i = 0  # 0~h-1
+        i = 0
         last_i = False
         while i < h and not last_i:
             j = 0
@@ -204,20 +192,18 @@ class ImageRestorationModel(BaseModel):
 
         l_total = 0
         loss_dict = OrderedDict()
-        # pixel loss
+        # 像素损失
         if self.cri_pix:
             l_pix = 0.
             for pred in preds:
                 l_pix += self.cri_pix(pred, self.gt)
 
-            # print('l pix ... ', l_pix)
             l_total += l_pix
             loss_dict['l_pix'] = l_pix
 
-        # perceptual loss
+        # 感知损失
         if self.cri_perceptual:
             l_percep, l_style = self.cri_perceptual(self.output, self.gt)
-            #
             if l_percep is not None:
                 l_total += l_percep
                 loss_dict['l_percep'] = l_percep
@@ -228,9 +214,15 @@ class ImageRestorationModel(BaseModel):
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
 
         l_total.backward()
-        use_grad_clip = self.opt['train'].get('use_grad_clip', True)
-        if use_grad_clip:
-            torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
+
+        # ✅ 正确添加梯度裁剪（根据配置）
+        if 'clip_grad_norm' in train_opt and train_opt['clip_grad_norm'] > 0:
+            torch.nn.utils.clip_grad_norm_(
+                self.net_g.parameters(),
+                max_norm=train_opt['clip_grad_norm'],
+                norm_type=2.0
+            )
+
         self.optimizer_g.step()
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
@@ -256,11 +248,7 @@ class ImageRestorationModel(BaseModel):
         self.net_g.train()
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        #dataset_name = dataloader.dataset.opt['name']
-        # 访问原始数据集的 opt 属性
-        # 检查是否是分布式环境
         if not torch.distributed.is_initialized():
-            # 在非分布式环境下直接运行验证
             self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
             return
         if isinstance(dataloader.dataset, torch.utils.data.Subset):
@@ -301,7 +289,6 @@ class ImageRestorationModel(BaseModel):
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
                 del self.gt
 
-            # tentative for out of GPU memory
             del self.lq
             del self.output
             torch.cuda.empty_cache()
@@ -311,18 +298,14 @@ class ImageRestorationModel(BaseModel):
                     L_img = sr_img[:, :, :3]
                     R_img = sr_img[:, :, 3:]
 
-                    # visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
                     visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
-
                     imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
                     imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
                 else:
                     if self.opt['is_train']:
-
                         save_img_path = osp.join(self.opt['path']['visualization'],
                                                  img_name,
                                                  f'{img_name}_{current_iter}.png')
-
                         save_gt_img_path = osp.join(self.opt['path']['visualization'],
                                                     img_name,
                                                     f'{img_name}_{current_iter}_gt.png')
@@ -338,7 +321,6 @@ class ImageRestorationModel(BaseModel):
                     imwrite(gt_img, save_gt_img_path)
 
             if with_metrics:
-                # calculate metrics
                 opt_metric = deepcopy(self.opt['val']['metrics'])
                 if use_image:
                     for name, opt_ in opt_metric.items():
@@ -356,12 +338,10 @@ class ImageRestorationModel(BaseModel):
                 for _ in range(world_size):
                     pbar.update(1)
                     pbar.set_description(f'Test {img_name}')
-            # if cnt >= 10:      #限制只处理前十张进行测试
-            #     break
+
         if rank == 0:
             pbar.close()
 
-        # current_metric = 0.
         collected_metrics = OrderedDict()
         if with_metrics:
             for metric in self.metric_results.keys():
@@ -393,17 +373,10 @@ class ImageRestorationModel(BaseModel):
                                                tb_logger, metrics_dict)
         return 0.
 
-    # def nondist_validation(self, *args, **kwargs):
-    #     logger = get_root_logger()
-    #     logger.warning('nondist_validation is not implemented. Run dist_validation.')
-    #     self.dist_validation(*args, **kwargs)
     def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        # 在非分布式环境下直接运行验证
         self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
-    #新增方法，专门用于非分布式环境
+
     def _run_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        #dataset_name = dataloader.dataset.opt['name']
-        # 访问原始数据集的 opt 属性
         if isinstance(dataloader.dataset, torch.utils.data.Subset):
             dataset_name = dataloader.dataset.dataset.opt['name']
         else:
@@ -435,7 +408,6 @@ class ImageRestorationModel(BaseModel):
                 gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
                 del self.gt
 
-            # tentative for out of GPU memory
             del self.lq
             del self.output
             torch.cuda.empty_cache()
@@ -468,7 +440,6 @@ class ImageRestorationModel(BaseModel):
                     imwrite(gt_img, save_gt_img_path)
 
             if with_metrics:
-                # calculate metrics
                 opt_metric = deepcopy(self.opt['val']['metrics'])
                 if use_image:
                     for name, opt_ in opt_metric.items():
@@ -481,19 +452,13 @@ class ImageRestorationModel(BaseModel):
                         self.metric_results[name] += getattr(
                             metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
 
-
             cnt += 1
-            # 限制只测试前10张图片
-            # if cnt >= 10:
-            #     break
 
-        # Log validation metrics
         if with_metrics:
             metrics_dict = {}
             for metric in self.metric_results.keys():
                 metrics_dict[metric] = self.metric_results[metric] / cnt
             self._log_validation_metric_values(current_iter, dataset_name, tb_logger, metrics_dict)
-        
 
     def _log_validation_metric_values(self, current_iter, dataset_name,
                                       tb_logger, metric_dict):
@@ -504,7 +469,6 @@ class ImageRestorationModel(BaseModel):
         logger.info(log_str)
 
         log_dict = OrderedDict()
-        # for name, value in loss_dict.items():
         for metric, value in metric_dict.items():
             log_dict[f'm_{metric}'] = value
 
