@@ -188,7 +188,7 @@ class ImageRestorationModel(BaseModel):
 
         self.output = (preds / count_mt).to(self.device)
         self.lq = self.origin_lq
-        
+
     def get_current_learning_rate(self):
         return self.optimizer_g.param_groups[0]['lr']
 
@@ -240,8 +240,8 @@ class ImageRestorationModel(BaseModel):
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
         # 添加学习率到 log_dict
-        self.log_dict['lrs'] = self.get_current_learning_rate()
-    
+        self.log_dict['lrs'] = [self.get_current_learning_rate()]  # 确保是列表
+
     def reduce_loss_dict(self, loss_dict):
         """Reduce loss dict.
 
@@ -264,7 +264,7 @@ class ImageRestorationModel(BaseModel):
                     reduced_loss_dict[key] = loss_dict[key].item()
 
         # 添加学习率
-        reduced_loss_dict['lrs'] = self.get_current_learning_rate()
+        reduced_loss_dict['lrs'] = [self.get_current_learning_rate()]  # 确保是列表
 
         return reduced_loss_dict
 
