@@ -91,7 +91,7 @@ class ImageRestorationModel(BaseModel):
 
         # 显式移除无效参数
         invalid_keys = []
-        for key in train_opt['optim_g'].keys():
+        for key in list(train_opt['optim_g'].keys()):  # 使用 list 避免 RuntimeError
             if key not in valid_params_list:
                 invalid_keys.append(key)
                 train_opt['optim_g'].pop(key)  # 移除无效参数
@@ -99,19 +99,16 @@ class ImageRestorationModel(BaseModel):
         if invalid_keys:
             print(f"Removed invalid optimizer parameters: {invalid_keys}")
 
-        # 定义优化器支持的参数
-        valid_params = train_opt['optim_g']
-
         # 打印传递给优化器的参数
-        print(f"Parameters passed to optimizer: {valid_params}")
+        print(f"Parameters passed to optimizer: {train_opt['optim_g']}")
 
         # 根据优化器类型创建优化器
         if optim_type == 'Adam':
-            self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **valid_params)
+            self.optimizer_g = torch.optim.Adam([{'params': optim_params}], **train_opt['optim_g'])
         elif optim_type == 'SGD':
-            self.optimizer_g = torch.optim.SGD(optim_params, **valid_params)
+            self.optimizer_g = torch.optim.SGD(optim_params, **train_opt['optim_g'])
         elif optim_type == 'AdamW':
-            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}], **valid_params)
+            self.optimizer_g = torch.optim.AdamW([{'params': optim_params}], **train_opt['optim_g'])
         else:
             raise NotImplementedError(f'optimizer {optim_type} is not supported yet.')
 
