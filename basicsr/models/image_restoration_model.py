@@ -240,7 +240,7 @@ class ImageRestorationModel(BaseModel):
 
         self.log_dict = self.reduce_loss_dict(loss_dict)
         # 添加学习率到 log_dict
-        self.log_dict['lrs'] = [self.get_current_learning_rate()]  # 确保是列表
+        self.log_dict['lrs'] = self.get_current_learning_rate()
     
     def reduce_loss_dict(self, loss_dict):
         """Reduce loss dict.
@@ -254,10 +254,17 @@ class ImageRestorationModel(BaseModel):
         with torch.no_grad():
             if self.opt['num_gpu'] > 1:
                 for key in loss_dict:
+                    if key == 'lrs':
+                        continue  # 跳过学习率
                     reduced_loss_dict[key] = loss_dict[key].mean().item()
             else:
                 for key in loss_dict:
+                    if key == 'lrs':
+                        continue  # 跳过学习率
                     reduced_loss_dict[key] = loss_dict[key].item()
+
+        # 添加学习率
+        reduced_loss_dict['lrs'] = self.get_current_learning_rate()
 
         return reduced_loss_dict
 
