@@ -30,6 +30,8 @@ class ImageRestorationModel(BaseModel):
         # define network
         self.net_g = define_network(deepcopy(opt['network_g']))
         self.net_g = self.model_to_device(self.net_g)
+        self.net_g = self.net_g.to(self.device)  # 确保模型在正确的设备上
+
 
         # load pretrained models
         load_path = self.opt['path'].get('pretrain_network_g', None)
@@ -254,7 +256,17 @@ class ImageRestorationModel(BaseModel):
         self.net_g.train()
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
-        dataset_name = dataloader.dataset.opt['name']
+        #dataset_name = dataloader.dataset.opt['name']
+        # 访问原始数据集的 opt 属性
+        # 检查是否是分布式环境
+        if not torch.distributed.is_initialized():
+            # 在非分布式环境下直接运行验证
+            self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
+            return
+        if isinstance(dataloader.dataset, torch.utils.data.Subset):
+            dataset_name = dataloader.dataset.dataset.opt['name']
+        else:
+            dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
         if with_metrics:
             self.metric_results = {
@@ -344,6 +356,8 @@ class ImageRestorationModel(BaseModel):
                 for _ in range(world_size):
                     pbar.update(1)
                     pbar.set_description(f'Test {img_name}')
+            # if cnt >= 10:      #限制只处理前十张进行测试
+            #     break
         if rank == 0:
             pbar.close()
 
@@ -379,10 +393,107 @@ class ImageRestorationModel(BaseModel):
                                                tb_logger, metrics_dict)
         return 0.
 
-    def nondist_validation(self, *args, **kwargs):
-        logger = get_root_logger()
-        logger.warning('nondist_validation is not implemented. Run dist_validation.')
-        self.dist_validation(*args, **kwargs)
+    # def nondist_validation(self, *args, **kwargs):
+    #     logger = get_root_logger()
+    #     logger.warning('nondist_validation is not implemented. Run dist_validation.')
+    #     self.dist_validation(*args, **kwargs)
+    def nondist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
+        # 在非分布式环境下直接运行验证
+        self._run_validation(dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image)
+    #新增方法，专门用于非分布式环境
+    def _run_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image):
+        #dataset_name = dataloader.dataset.opt['name']
+        # 访问原始数据集的 opt 属性
+        if isinstance(dataloader.dataset, torch.utils.data.Subset):
+            dataset_name = dataloader.dataset.dataset.opt['name']
+        else:
+            dataset_name = dataloader.dataset.opt['name']
+        with_metrics = self.opt['val'].get('metrics') is not None
+        if with_metrics:
+            self.metric_results = {
+                metric: 0
+                for metric in self.opt['val']['metrics'].keys()
+            }
+
+        cnt = 0
+
+        for idx, val_data in enumerate(dataloader):
+            img_name = osp.splitext(osp.basename(val_data['lq_path'][0]))[0]
+
+            self.feed_data(val_data, is_val=True)
+            if self.opt['val'].get('grids', False):
+                self.grids()
+
+            self.test()
+
+            if self.opt['val'].get('grids', False):
+                self.grids_inverse()
+
+            visuals = self.get_current_visuals()
+            sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
+            if 'gt' in visuals:
+                gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
+                del self.gt
+
+            # tentative for out of GPU memory
+            del self.lq
+            del self.output
+            torch.cuda.empty_cache()
+
+            if save_img:
+                if sr_img.shape[2] == 6:
+                    L_img = sr_img[:, :, :3]
+                    R_img = sr_img[:, :, 3:]
+
+                    visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
+                    imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
+                    imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
+                else:
+                    if self.opt['is_train']:
+                        save_img_path = osp.join(self.opt['path']['visualization'],
+                                                 img_name,
+                                                 f'{img_name}_{current_iter}.png')
+                        save_gt_img_path = osp.join(self.opt['path']['visualization'],
+                                                    img_name,
+                                                    f'{img_name}_{current_iter}_gt.png')
+                    else:
+                        save_img_path = osp.join(
+                            self.opt['path']['visualization'], dataset_name,
+                            f'{img_name}.png')
+                        save_gt_img_path = osp.join(
+                            self.opt['path']['visualization'], dataset_name,
+                            f'{img_name}_gt.png')
+
+                    imwrite(sr_img, save_img_path)
+                    imwrite(gt_img, save_gt_img_path)
+
+            if with_metrics:
+                # calculate metrics
+                opt_metric = deepcopy(self.opt['val']['metrics'])
+                if use_image:
+                    for name, opt_ in opt_metric.items():
+                        metric_type = opt_.pop('type')
+                        self.metric_results[name] += getattr(
+                            metric_module, metric_type)(sr_img, gt_img, **opt_)
+                else:
+                    for name, opt_ in opt_metric.items():
+                        metric_type = opt_.pop('type')
+                        self.metric_results[name] += getattr(
+                            metric_module, metric_type)(visuals['result'], visuals['gt'], **opt_)
+
+
+            cnt += 1
+            # 限制只测试前10张图片
+            # if cnt >= 10:
+            #     break
+
+        # Log validation metrics
+        if with_metrics:
+            metrics_dict = {}
+            for metric in self.metric_results.keys():
+                metrics_dict[metric] = self.metric_results[metric] / cnt
+            self._log_validation_metric_values(current_iter, dataset_name, tb_logger, metrics_dict)
+        
 
     def _log_validation_metric_values(self, current_iter, dataset_name,
                                       tb_logger, metric_dict):
