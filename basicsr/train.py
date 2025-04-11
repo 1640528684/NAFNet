@@ -211,6 +211,10 @@ def main():
                 }
                 log_vars.update(model.get_current_log())
                 msg_logger(log_vars)
+                
+                # 添加检查和更新代码
+                if 'lrs' not in log_vars:
+                    log_vars['lrs'] = model.get_current_learning_rate()
 
                 # TensorBoard 记录
                 if tb_logger:
