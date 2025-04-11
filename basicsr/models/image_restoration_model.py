@@ -190,7 +190,8 @@ class ImageRestorationModel(BaseModel):
         self.lq = self.origin_lq
 
     def get_current_learning_rate(self):
-        return self.optimizer_g.param_groups[0]['lr']
+        #return self.optimizer_g.param_groups[0]['lr']
+        return [self.optimizer_g.param_groups[0]['lr']]
 
     def optimize_parameters(self, current_iter, tb_logger):
         self.optimizer_g.zero_grad()
