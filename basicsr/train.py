@@ -207,7 +207,7 @@ def main():
                     'total_iter': total_iters,
                     'time': iter_time,
                     'data_time': data_time,
-                    'lrs': model.get_current_learning_rate()
+                    'lrs': model.get_current_learning_rate()  # 确保是列表
                 }
                 log_vars.update(model.get_current_log())
                 msg_logger(log_vars)
@@ -217,7 +217,8 @@ def main():
                     for k, v in log_vars.items():
                         if k in ['l_total', 'l_pix', 'l_perceptual', 'l_gan']:
                             tb_logger.add_scalar(f'train/{k}', v, current_iter)
-                    tb_logger.add_scalar('train/lr', log_vars['lrs'], current_iter)
+                    # 确保使用列表中的第一个元素
+                    tb_logger.add_scalar('train/lr', log_vars['lrs'][0], current_iter)
                     tb_logger.flush()
 
             # 保存最佳模型
