@@ -108,11 +108,22 @@ class ImageRestorationModel(BaseModel):
 
     def feed_data(self, data, is_val=False):
         # 检查 data 字典中是否存在 lq 键
+        # if 'lq' not in data:
+        #     raise KeyError("The 'lq' key is missing in the data dictionary.")
+        # self.lq = data['lq'].to(self.device)
+        # if 'gt' in data:
+        #     self.gt = data['gt'].to(self.device)
+        # 检查 data 字典中是否存在 lq 键
         if 'lq' not in data:
             raise KeyError("The 'lq' key is missing in the data dictionary.")
         self.lq = data['lq'].to(self.device)
+        if torch.isnan(self.lq).any() or torch.isinf(self.lq).any():
+            raise ValueError("Input data 'lq' contains NaN or Inf values.")
+    
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
+            if torch.isnan(self.gt).any() or torch.isinf(self.gt).any():
+                raise ValueError("Input data 'gt' contains NaN or Inf values.")
 
     def grids(self):
         b, c, h, w = self.gt.size()
@@ -215,10 +226,19 @@ class ImageRestorationModel(BaseModel):
         if self.cri_pix:
             l_pix = 0.
             for pred in preds:
-                l_pix += self.cri_pix(pred, self.gt)
-
+                #l_pix += self.cri_pix(pred, self.gt)
+                l_pix_part = self.cri_pix(pred, self.gt)
+                if torch.isnan(l_pix_part).any():
+                    print(f"NaN detected in l_pix_part: pred={pred}, gt={self.gt}")
+                l_pix += l_pix_part
+                
+            if torch.isnan(l_pix).any():
+                print(f"NaN detected in l_pix: preds={preds}, gt={self.gt}")
             l_total += l_pix
             loss_dict['l_pix'] = l_pix
+
+            # l_total += l_pix
+            # loss_dict['l_pix'] = l_pix
 
         # 感知损失
         if self.cri_perceptual:
@@ -231,6 +251,9 @@ class ImageRestorationModel(BaseModel):
                 loss_dict['l_style'] = l_style
 
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
+        
+        if torch.isnan(l_total).any():
+            print(f"NaN detected in l_total: l_pix={l_pix}, l_percep={l_percep}, l_style={l_style}")
 
         l_total.backward()
 
