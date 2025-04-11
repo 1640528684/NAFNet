@@ -207,7 +207,7 @@ def main():
                     'total_iter': total_iters,
                     'time': iter_time,
                     'data_time': data_time,
-                    'lrs': model.get_current_learning_rate()  # 确保是列表
+                    'lrs': [model.get_current_learning_rate()]  # 确保是列表
                 }
                 log_vars.update(model.get_current_log())
                 msg_logger(log_vars)
