@@ -5,6 +5,7 @@ from collections import OrderedDict
 from copy import deepcopy
 from os import path as osp
 from tqdm import tqdm
+import logging
 
 from basicsr.models.archs import define_network
 from basicsr.models.base_model import BaseModel
@@ -106,6 +107,9 @@ class ImageRestorationModel(BaseModel):
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
+        # 检查 data 字典中是否存在 lq 键
+        if 'lq' not in data:
+            raise KeyError("The 'lq' key is missing in the data dictionary.")
         self.lq = data['lq'].to(self.device)
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
@@ -498,13 +502,18 @@ class ImageRestorationModel(BaseModel):
                 metrics_dict[metric] = self.metric_results[metric] / cnt
             self._log_validation_metric_values(current_iter, dataset_name, tb_logger, metrics_dict)
 
-    def _log_validation_metric_values(self, current_iter, dataset_name,
-                                      tb_logger, metric_dict):
+    def _log_validation_metric_values(self, current_iter, dataset_name,tb_logger, metric_dict):
         log_str = f'Validation {dataset_name}, \t'
         for metric, value in metric_dict.items():
             log_str += f'\t # {metric}: {value:.4f}'
         logger = get_root_logger()
+        logger.setLevel(logging.INFO)
         logger.info(log_str)
+        
+        # 记录日志信息到 TensorBoard
+        if tb_logger:
+            for metric, value in metric_dict.items():
+                tb_logger.add_scalar(f'{dataset_name}/m_{metric}', value, current_iter)
 
         log_dict = OrderedDict()
         for metric, value in metric_dict.items():
