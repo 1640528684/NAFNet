@@ -523,3 +523,11 @@ class ImageRestorationModel(BaseModel):
     def save(self, epoch, current_iter):
         self.save_network(self.net_g, 'net_g', current_iter)
         self.save_training_state(epoch, current_iter)
+        
+    # 添加 get_state_dict 方法
+    def get_state_dict(self):
+        return self.net_g.state_dict()
+    def get_optimizers(self):
+        return [optimizer.state_dict() for optimizer in self.optimizers]
+    def get_schedulers(self):
+        return [scheduler.state_dict() for scheduler in self.schedulers]
