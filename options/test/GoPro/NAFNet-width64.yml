@@ -44,7 +44,7 @@ path:
   pretrain_network_g: null  # 如果不需要加载预训练模型，设置为 null
   strict_load_g: true
   resume_state: null  # 如果不需要恢复训练状态，设置为 null
-  best_state: ../experiments/NAFNet-GoPro-width64/best_model.pth
+  best_state: null #../experiments/NAFNet-GoPro-width64/best_model.pth
 
 # training settings
 train:
