@@ -212,7 +212,7 @@ def main():
                     'lrs': [model.get_current_learning_rate()]  # 确保是列表
                 }
                 log_vars.update(model.get_current_log())
-                msg_logger(log_vars)
+                # msg_logger(log_vars)
 
                 # 添加检查和更新代码
                 if 'lrs' not in log_vars:
@@ -267,6 +267,10 @@ def main():
                     'lrs': [model.get_current_learning_rate()]  # 确保是列表
                 }
                 log_vars.update(val_log)
+                
+                # 检查和更新代码
+                if 'lrs' not in log_vars:
+                    log_vars['lrs'] = [model.get_current_learning_rate()]
 
                 # 确保 log_vars['lrs'] 是列表
                 if not isinstance(log_vars['lrs'], list):
