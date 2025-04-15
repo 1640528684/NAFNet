@@ -110,7 +110,7 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     # 自动恢复训练状态
-    state_folder_path = osp.join('experiments', opt['name'], 'training_states')
+    state_folder_path = None #osp.join('experiments', opt['name'], 'training_states')
     resume_state = None
     if opt['rank'] == 0:
         try:
