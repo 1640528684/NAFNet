@@ -1,33 +1,38 @@
-# ------------------------------------------------------------------------
-# Copyright (c) 2022 megvii-model. All Rights Reserved.
-# ------------------------------------------------------------------------
-# Modified from BasicSR (https://github.com/xinntao/BasicSR)
-# Copyright 2018-2020 BasicSR Authors
-# ------------------------------------------------------------------------
 # general settings
-name: NAFNet-GoPro-width64-test
+name: NAFNet-GoPro-width64
 model_type: ImageRestorationModel
 scale: 1
-num_gpu: 1 # set num_gpu: 0 for cpu mode    GPU:1
+num_gpu: 8
 manual_seed: 10
 
-# dataset and data loader settings
 datasets:
+  train:
+    name: gopro-train
+    type: PairedImageDataset
+    dataroot_gt: ../datasets/GoPro/train/target
+    dataroot_lq: ../datasets/GoPro/train/input
+    filename_tmpl: '{}'
+    io_backend:
+      type: disk
+    gt_size: 256
+    use_flip: true
+    use_rot: true
+    batch_size_per_gpu: 5
+    total_iter: 640000
+    use_shuffle: true
+    num_worker_per_gpu: 4
+    dataset_enlarge_ratio: 1
+    prefetch_mode: ~
 
-  test:
+  val:
     name: gopro-test
     type: PairedImageDataset
-
     dataroot_gt: ../datasets/GoPro/test/target.lmdb
     dataroot_lq: ../datasets/GoPro/test/input.lmdb
-
-    #max_dataset_size: 10  
-
     io_backend:
       type: lmdb
+    val_freq: 10000
 
-# network structures
-#NAFNetLocal mutv4Local NNNNet_archLocal v46Local v51editLocal v33editLocal
 network_g:
   type: v51editLocal
   width: 64
@@ -35,18 +40,46 @@ network_g:
   middle_blk_num: 1
   dec_blk_nums: [1, 1, 1, 1]
 
-# path
 path:
-  pretrain_network_g: experiments/pretrained_models/NAFNet-GoPro-width64.pth
+  pretrain_network_g: null  # 如果不需要加载预训练模型，设置为 null
   strict_load_g: true
-  resume_state: ~
+  resume_state: null  # 如果不需要恢复训练状态，设置为 null
+  best_state: ../experiments/NAFNet-GoPro-width64/best_model.pth
+
+# training settings
+train:
+  train:
+    mixup: false
+  optim_g:
+    type: AdamW
+    lr: !!float 1e-4
+    weight_decay: !!float 1e-8
+    betas: [0.9, 0.9]
+
+  scheduler:
+    type: TrueCosineAnnealingLR
+    T_max: 640000
+    eta_min: !!float 1e-7
+
+  total_iter: 640000
+  warmup_iter: -1
+
+  losses:
+    pixel:
+      type: SmoothL1Loss
+      loss_weight: 0.5
+    perceptual:
+      type: PerceptualLoss
+      layer_name: 'relu3_3'
+      vgg_type: 'vgg19'
+      criterion: 'l1'
 
 # validation settings
 val:
-  save_img: true
-  grids: false
+  val_freq: !!float 10000
+  save_img: false
   metrics:
-    psnr: # metric name, can be arbitrary
+    psnr:
       type: calculate_psnr
       crop_border: 0
       test_y_channel: false
@@ -54,6 +87,15 @@ val:
       type: calculate_ssim
       crop_border: 0
       test_y_channel: false
+
+# logging settings
+logger:
+  print_freq: 200
+  save_checkpoint_freq: !!float 5000
+  use_tb_logger: true
+  wandb:
+    project: ~
+    resume_id: ~
 
 # dist training settings
 dist_params:
