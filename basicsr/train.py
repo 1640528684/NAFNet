@@ -273,11 +273,22 @@ def main():
                     log_vars['lrs'] = [log_vars['lrs']]
 
                 msg_logger(log_vars)
+                
+                # 添加检查和更新代码
+                if 'lrs' not in log_vars:
+                    log_vars['lrs'] = [model.get_current_learning_rate()]
+                    
+                # 确保 log_vars['lrs'] 是列表
+                if not isinstance(log_vars['lrs'], list):
+                    log_vars['lrs'] = [log_vars['lrs']]
 
                 # TensorBoard 记录验证指标
                 if tb_logger:
-                    for k, v in val_log.items():
-                        tb_logger.add_scalar(f'val/{k}', v, current_iter)
+                    # for k, v in val_log.items():
+                    #     tb_logger.add_scalar(f'val/{k}', v, current_iter)
+                    for k, v in log_vars.items():
+                        if k in ['l_total', 'l_pix', 'l_perceptual', 'l_gan']:
+                            tb_logger.add_scalar(f'train/{k}', v, current_iter)
                     tb_logger.add_scalar('train/lr', log_vars['lrs'][0], current_iter)
                     tb_logger.flush()
 
