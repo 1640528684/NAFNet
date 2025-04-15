@@ -235,24 +235,24 @@ def main():
             if 'l_total' in model.log_dict and model.log_dict['l_total'] < best_loss:
                 best_loss = model.log_dict['l_total']
                 logger.info(f'New best model at iter {current_iter} (loss: {best_loss:.4f})')
-                model.save(start_epoch, current_iter, is_best=True)
+                #model.save(start_epoch, current_iter, is_best=True)
 
             # 保存检查点
-            if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
-                logger.info('Saving models and training states.')
-                model.save(start_epoch, current_iter)
+            # if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
+            #     logger.info('Saving models and training states.')
+            #     model.save(start_epoch, current_iter)
 
-                # 保存训练状态到文件
-                if opt['rank'] == 0:
-                    save_states = {
-                        'iter': current_iter,
-                        'epoch': start_epoch,
-                        'state_dict': model.get_state_dict(),
-                        'optimizers': model.get_optimizers(),
-                        'schedulers': model.get_schedulers()
-                    }
-                    state_path = osp.join(state_folder_path, f"{current_iter}.state")
-                    torch.save(save_states, state_path)
+            #     # 保存训练状态到文件
+            #     if opt['rank'] == 0:
+            #         save_states = {
+            #             'iter': current_iter,
+            #             'epoch': start_epoch,
+            #             'state_dict': model.get_state_dict(),
+            #             'optimizers': model.get_optimizers(),
+            #             'schedulers': model.get_schedulers()
+            #         }
+            #         state_path = osp.join(state_folder_path, f"{current_iter}.state")
+            #         torch.save(save_states, state_path)
 
             # 验证
             if opt.get('val') and current_iter % opt['val']['val_freq'] == 0:
@@ -290,7 +290,7 @@ def main():
     consumed_time = str(datetime.timedelta(seconds=int(time.time() - start_time)))
     logger.info(f'End of training. Time consumed: {consumed_time}')
     logger.info('Saving the latest model.')
-    model.save(-1, -1)  # 保存最新模型
+    #model.save(-1, -1)  # 保存最新模型
 
     # 最终验证
     if opt.get('val'):
