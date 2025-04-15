@@ -110,7 +110,7 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     # 自动恢复训练状态
-    state_folder_path = None #osp.join('experiments', opt['name'], 'training_states')
+    state_folder_path = osp.join('experiments', opt['name'], 'training_states')
     resume_state = None
     if opt['rank'] == 0:
         try:
@@ -145,12 +145,14 @@ def main():
 
     # 初始化模型
     if resume_state:
-        check_resume(opt, resume_state['iter'])
+        check_resume(opt,0) #check_resume(opt, resume_state['iter'])
         model = create_model(opt)
         model.resume_training(resume_state)
-        logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
-        start_epoch = resume_state['epoch']
-        current_iter = resume_state['iter']
+        logger.info(f"Resuming training from epoch: 0, iter: 0.") #logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
+        # start_epoch = resume_state['epoch']
+        # current_iter = resume_state['iter']
+        start_epoch = 0
+        current_iter = 0
     else:
         model = create_model(opt)
         start_epoch = 0
