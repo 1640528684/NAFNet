@@ -123,6 +123,7 @@ def main():
     opt = parse_options(is_train=True)
     torch.backends.cudnn.benchmark = True
 
+<<<<<<< HEAD
     # 自动恢复训练状态
     state_folder_path = osp.join('experiments', opt['name'], 'training_states')
     resume_state = None
@@ -145,19 +146,68 @@ def main():
             map_location=lambda storage, loc: storage.cuda(device_id))
     else:
         resume_state = None
+=======
+    #自动恢复训练状态
+    # state_folder_path = osp.join('experiments', opt['name'], 'training_states')
+    # resume_state = None
+    # if opt['rank'] == 0:
+    #     try:
+    #         states = os.listdir(state_folder_path)
+    #         if states:
+    #             max_state_file = f"{max(int(f.split('.')[0]) for f in states) if states else 0}.state"
+    #             resume_state_path = osp.join(state_folder_path, max_state_file)
+    #             if osp.exists(resume_state_path):
+    #                 resume_state = resume_state_path
+    #                 opt['path']['resume_state'] = resume_state
+    #     except FileNotFoundError:
+    #         pass
+
+    # if opt['path'].get('resume_state'):
+    #     device_id = torch.cuda.current_device()
+    #     resume_state = torch.load(
+    #         opt['path']['resume_state'],
+    #         map_location=lambda storage, loc: storage.cuda(device_id))
+    # else:
+    #     resume_state = None
+>>>>>>> 14c821e2861bc81e82dda29d0e6f7b82d76ef85e
 
     # 初始化目录和日志
-    if resume_state is None:
-        make_exp_dirs(opt)
-        if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name'] and opt['rank'] == 0:
-            mkdir_and_rename(osp.join('tb_logger', opt['name']))
+    # if resume_state is None:
+    #     make_exp_dirs(opt)
+    #     if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name'] and opt['rank'] == 0:
+    #         mkdir_and_rename(osp.join('tb_logger', opt['name']))
+    # 初始化目录和日志
+    make_exp_dirs(opt)
+    if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name'] and opt['rank'] == 0:
+        mkdir_and_rename(osp.join('tb_logger', opt['name']))
 
     logger, tb_logger = init_loggers(opt)
+    # 初始化目录和日志
+    # make_exp_dirs(opt)
+    # if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name'] and opt['rank'] == 0:
+    #     mkdir_and_rename(osp.join('tb_logger', opt['name']))
+
+    # logger, tb_logger = init_loggers(opt)
 
     # 创建数据加载器
     train_loader, train_sampler, val_loader, total_epochs, total_iters = create_train_val_dataloader(opt, logger)
 
+    # # 初始化模型
+    # if resume_state:
+    #     check_resume(opt,0) #check_resume(opt, resume_state['iter'])
+    #     model = create_model(opt)
+    #     model.resume_training(resume_state)
+    #     logger.info(f"Resuming training from epoch: 0, iter: 0.") #logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
+    #     # start_epoch = resume_state['epoch']
+    #     # current_iter = resume_state['iter']
+    #     start_epoch = 0
+    #     current_iter = 0
+    # else:
+    #     model = create_model(opt)
+    #     start_epoch = 0
+    #     current_iter = 0
     # 初始化模型
+<<<<<<< HEAD
     if resume_state:
         check_resume(opt, 0)
         model = create_model(opt)
@@ -169,6 +219,11 @@ def main():
         model = create_model(opt)
         start_epoch = 0
         current_iter = 0
+=======
+    model = create_model(opt)
+    start_epoch = 0
+    current_iter = 0    
+>>>>>>> 14c821e2861bc81e82dda29d0e6f7b82d76ef85e
 
     # 初始化消息记录器
     msg_logger = MessageLogger(opt, current_iter, tb_logger)
@@ -224,7 +279,7 @@ def main():
                     'lrs': [model.get_current_learning_rate()]  # 确保是列表
                 }
                 log_vars.update(model.get_current_log())
-                msg_logger(log_vars)
+                # msg_logger(log_vars)
 
                 # 添加检查和更新代码
                 if 'lrs' not in log_vars:
@@ -279,6 +334,10 @@ def main():
                     'lrs': [model.get_current_learning_rate()]  # 确保是列表
                 }
                 log_vars.update(val_log)
+                
+                # 检查和更新代码
+                if 'lrs' not in log_vars:
+                    log_vars['lrs'] = [model.get_current_learning_rate()]
 
                 # 确保 log_vars['lrs'] 是列表
                 if not isinstance(log_vars['lrs'], list):
