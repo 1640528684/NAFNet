@@ -218,12 +218,8 @@ class ImageRestorationModel(BaseModel):
         l_pix = 0.
         for pred in preds:
             l_pix_part = self.cri_pix(pred, self.gt)
-            if torch.isnan(l_pix_part).any():
-                print(f"NaN detected in l_pix_part: pred={pred}, gt={self.gt}")
             l_pix += l_pix_part
         
-        if torch.isnan(l_pix).any():
-            print(f"NaN detected in l_pix: preds={preds}, gt={self.gt}")
         l_total += l_pix
         loss_dict['l_pix'] = l_pix
 
@@ -240,9 +236,6 @@ class ImageRestorationModel(BaseModel):
                 loss_dict['l_style'] = l_style
 
         l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
-    
-        if torch.isnan(l_total).any():
-            print(f"NaN detected in l_total: l_pix={l_pix}, l_percep={l_percep}, l_style={l_style}")
 
         l_total.backward()
 
