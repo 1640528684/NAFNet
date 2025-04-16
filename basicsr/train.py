@@ -12,16 +12,15 @@ sys.path.append(os.path.dirname(root_dir))  # 将根目录（NAFNet）加入路�
 import torch
 import torch.distributed as dist
 from torch.utils.data import DataLoader
+
 from basicsr.data import create_dataloader, create_dataset
 from basicsr.data.data_sampler import EnlargedSampler
 from basicsr.data.prefetch_dataloader import CPUPrefetcher, CUDAPrefetcher
 from basicsr.models import create_model
-from basicsr.utils import (MessageLogger, check_resume, get_env_info,
-                           get_root_logger, get_time_str, init_tb_logger,
-                           init_wandb_logger, make_exp_dirs, mkdir_and_rename,
-                           set_random_seed)
+from basicsr.utils import (MessageLogger, check_resume, get_env_info, get_root_logger, get_time_str, init_tb_logger, init_wandb_logger, make_exp_dirs, mkdir_and_rename, set_random_seed)
 from basicsr.utils.dist_util import get_dist_info, init_dist
 from basicsr.utils.options import dict2str, parse
+
 
 def parse_options(is_train=True):
     parser = argparse.ArgumentParser()
@@ -52,6 +51,7 @@ def parse_options(is_train=True):
 
     return opt
 
+
 def init_loggers(opt):
     log_file = osp.join(opt['path']['log'], f"train_{opt['name']}_{get_time_str()}.log")
     logger = get_root_logger(logger_name='basicsr', log_level=logging.INFO, log_file=log_file)
@@ -63,6 +63,7 @@ def init_loggers(opt):
         init_wandb_logger(opt)
     tb_logger = init_tb_logger(log_dir=osp.join('tb_logger', opt['name'])) if opt['logger'].get('use_tb_logger') else None
     return logger, tb_logger
+
 
 def create_train_val_dataloader(opt, logger):
     train_loader, val_loader = None, None
@@ -78,6 +79,18 @@ def create_train_val_dataloader(opt, logger):
                 dist=opt['dist'],
                 sampler=train_sampler,
                 seed=opt['manual_seed'])
+
+            # 支持未标记数据
+            if dataset_opt.get('use_unlabeled', False):
+                unlabeled_set = create_dataset(dataset_opt['unlabeled'])
+                unlabeled_loader = create_dataloader(
+                    unlabeled_set,
+                    dataset_opt['unlabeled'],
+                    num_gpu=opt['num_gpu'],
+                    dist=opt['dist'],
+                    sampler=None,
+                    seed=opt['manual_seed'])
+                logger.info(f'Number of unlabeled images: {len(unlabeled_set)}')
 
             num_iter_per_epoch = math.ceil(
                 len(train_set) * dataset_enlarge_ratio / (dataset_opt['batch_size_per_gpu'] * opt['world_size']))
@@ -105,6 +118,7 @@ def create_train_val_dataloader(opt, logger):
                 f'Number of val images/folders in {dataset_opt["name"]}: {len(val_set)}')
     return train_loader, train_sampler, val_loader, total_epochs, total_iters
 
+
 def main():
     opt = parse_options(is_train=True)
     torch.backends.cudnn.benchmark = True
@@ -116,7 +130,7 @@ def main():
         try:
             states = os.listdir(state_folder_path)
             if states:
-                max_state_file = f"{max(int(f.split('.')[0]) for f in states) if states else 0}.state"
+                max_state_file = f"{max(int(f.split('.')[0]) for f in states if f.endswith('.state'))}.state"
                 resume_state_path = osp.join(state_folder_path, max_state_file)
                 if osp.exists(resume_state_path):
                     resume_state = resume_state_path
@@ -145,12 +159,10 @@ def main():
 
     # 初始化模型
     if resume_state:
-        check_resume(opt,0) #check_resume(opt, resume_state['iter'])
+        check_resume(opt, 0)
         model = create_model(opt)
         model.resume_training(resume_state)
-        logger.info(f"Resuming training from epoch: 0, iter: 0.") #logger.info(f"Resuming training from epoch: {resume_state['epoch']}, iter: {resume_state['iter']}.")
-        # start_epoch = resume_state['epoch']
-        # current_iter = resume_state['iter']
+        logger.info(f"Resuming training from epoch: 0, iter: 0.")
         start_epoch = 0
         current_iter = 0
     else:
@@ -311,6 +323,7 @@ def main():
 
     if tb_logger:
         tb_logger.close()
+
 
 if __name__ == '__main__':
     os.environ['GRPC_POLL_STRATEGY'] = 'epoll1'

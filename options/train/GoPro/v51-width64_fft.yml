@@ -15,8 +15,8 @@ datasets:
   train:
     name: gopro-train
     type: PairedImageDataset
-    dataroot_gt: /data/users/qingluhou/Neural_network/motion_deblur/Datesets/GOPRO_bascisr/train/sharp_crops.lmdb
-    dataroot_lq: /data/users/qingluhou/Neural_network/motion_deblur/Datesets/GOPRO_bascisr/train/blur_crops.lmdb
+    dataroot_gt: E:\GoPro_test\GoPro\test\target.lmdb
+    dataroot_lq: E:\GoPro_test\GoPro\test\input.lmdb
 
     filename_tmpl: '{}'
     io_backend:
@@ -37,8 +37,8 @@ datasets:
   val:
     name: gopro-test
     type: PairedImageDataset
-    dataroot_gt: /data/users/qingluhou/Neural_network/motion_deblur/Datesets/GOPRO_bascisr/test/target.lmdb
-    dataroot_lq: /data/users/qingluhou/Neural_network/motion_deblur/Datesets/GOPRO_bascisr/test/input.lmdb
+    dataroot_gt: E:\GoPro_test\GoPro\test\target.lmdb
+    dataroot_lq: E:\GoPro_test\GoPro\test\input.lmdb
     io_backend:
       type: lmdb
 
@@ -77,6 +77,19 @@ train:
     type: PSNRLoss
     loss_weight: 1
     reduction: mean
+
+  fft_loss_opt:
+    type: FFTLoss
+    loss_weight: 1
+    reduction: mean
+
+  perceptual_loss_opt:
+    type: PerceptualLoss
+    loss_weight: 1
+    reduction: mean
+    layer_weights:
+      conv_5_1: 1.0
+    vgg_type: vgg19
 
 # validation settings
 val:

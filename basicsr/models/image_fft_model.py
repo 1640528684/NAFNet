@@ -55,20 +55,20 @@ class ImageFftModel(BaseModel):
             cri_fft_cls = getattr(loss_module, fft_type)
             self.cri_fft = cri_fft_cls(**train_opt['fft_loss_opt']).to(
                 self.device)
-
         else:
             self.cri_fft = None
 
-        if train_opt.get('perceptual_opt'):
-            percep_type = train_opt['perceptual_opt'].pop('type')
-            cri_perceptual_cls = getattr(loss_module, percep_type)
-            self.cri_perceptual = cri_perceptual_cls(
-                **train_opt['perceptual_opt']).to(self.device)
+        if train_opt.get('perceptual_loss_opt'):
+            from basicsr.models.losses import PerceptualLoss
+            self.cri_perceptual = PerceptualLoss(
+                layer_weights=train_opt['perceptual_loss_opt'].get('layer_weights', {'conv_5_1': 1.0}),
+                vgg_type=train_opt['perceptual_loss_opt'].get('vgg_type', 'vgg19')
+            ).to(self.device)
         else:
             self.cri_perceptual = None
 
-        if self.cri_pix is None and self.cri_perceptual is None:
-            raise ValueError('Both pixel and perceptual losses are None.')
+        if self.cri_pix is None and self.cri_perceptual is None and self.cri_fft is None:
+            raise ValueError('All losses are None.')
 
         # set up optimizers and schedulers
         self.setup_optimizers()
@@ -80,15 +80,10 @@ class ImageFftModel(BaseModel):
 
         for k, v in self.net_g.named_parameters():
             if v.requires_grad:
-                #         if k.startswith('module.offsets') or k.startswith('module.dcns'):
-                #             optim_params_lowlr.append(v)
-                #         else:
                 optim_params.append(v)
-            # else:
-            #     logger = get_root_logger()
-            #     logger.warning(f'Params {k} will not be optimized.')
-        # print(optim_params)
-        # ratio = 0.1
+            else:
+                logger = get_root_logger()
+                logger.warning(f'Params {k} will not be optimized.')
 
         optim_type = train_opt['optim_g'].pop('type')
         if optim_type == 'Adam':
@@ -100,10 +95,9 @@ class ImageFftModel(BaseModel):
         elif optim_type == 'AdamW':
             self.optimizer_g = torch.optim.AdamW([{'params': optim_params}],
                                                  **train_opt['optim_g'])
-            pass
         else:
             raise NotImplementedError(
-                f'optimizer {optim_type} is not supperted yet.')
+                f'optimizer {optim_type} is not supported yet.')
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
@@ -127,17 +121,12 @@ class ImageFftModel(BaseModel):
             crop_size_w = int(self.opt['val'].get('crop_size_w_ratio') * w)
 
         crop_size_h, crop_size_w = crop_size_h // self.scale * self.scale, crop_size_w // self.scale * self.scale
-        # adaptive step_i, step_j
         num_row = (h - 1) // crop_size_h + 1
         num_col = (w - 1) // crop_size_w + 1
 
         import math
         step_j = crop_size_w if num_col == 1 else math.ceil((w - crop_size_w) / (num_col - 1) - 1e-8)
         step_i = crop_size_h if num_row == 1 else math.ceil((h - crop_size_h) / (num_row - 1) - 1e-8)
-
-        scale = self.scale
-        step_i = step_i // scale * scale
-        step_j = step_j // scale * scale
 
         parts = []
         idxes = []
@@ -156,7 +145,7 @@ class ImageFftModel(BaseModel):
                     j = w - crop_size_w
                     last_j = True
                 parts.append(
-                    self.lq[:, :, i // scale:(i + crop_size_h) // scale, j // scale:(j + crop_size_w) // scale])
+                    self.lq[:, :, i // self.scale:(i + crop_size_h) // self.scale, j // self.scale:(j + crop_size_w) // self.scale])
                 idxes.append({'i': i, 'j': j})
                 j = j + step_j
             i = i + step_i
@@ -197,37 +186,54 @@ class ImageFftModel(BaseModel):
         if self.opt['train'].get('mixup', False):
             self.mixup_aug()
 
-        preds = self.net_g(self.lq)
-        if not isinstance(preds, list):
-            preds = [preds]
+        # 支持无监督学习
+        if self.opt['train'].get('unsupervised', False):
+            preds = self.net_g(self.lq)
+            if not isinstance(preds, list):
+                preds = [preds]
 
-        self.output = preds[-1]
+            self.output = preds[-1]
 
-        l_total = 0
-        loss_dict = OrderedDict()
-        # pixel loss
-        if self.cri_pix:
-            l_pix = 0.
-            for pred in preds:
-                l_pix += self.cri_pix(pred, self.gt)
+            l_total = 0
+            loss_dict = OrderedDict()
+            # 自监督损失（例如一致性损失）
+            if hasattr(self, 'cri_consistency'):
+                l_consistency = self.cri_consistency(preds[-1], self.lq)
+                l_total += l_consistency
+                loss_dict['l_consistency'] = l_consistency
 
-            # print('l pix ... ', l_pix)
-            l_total += l_pix
-            loss_dict['l_pix'] = l_pix
+            l_total.backward()
 
-        # fft loss
-        if self.cri_fft:
-            l_fft = self.cri_fft(preds[-1], self.gt)
-            l_total += l_fft
-            loss_dict['l_fft'] = l_fft
+        else:
+            preds = self.net_g(self.lq)
+            if not isinstance(preds, list):
+                preds = [preds]
 
-        l_total = l_total + 0. * sum(p.sum() for p in self.net_g.parameters())
+            self.output = preds[-1]
 
-        l_total = l_total
+            l_total = 0
+            loss_dict = OrderedDict()
+            # 像素损失
+            if self.cri_pix:
+                l_pix = 0.
+                for pred in preds:
+                    l_pix += self.cri_pix(pred, self.gt)
+                l_total += l_pix
+                loss_dict['l_pix'] = l_pix
 
-        l_total.backward()
+            # FFT 损失
+            if self.cri_fft:
+                l_fft = self.cri_fft(preds[-1], self.gt)
+                l_total += l_fft
+                loss_dict['l_fft'] = l_fft
 
-        ######################################################
+            # 感知损失
+            if self.cri_perceptual:
+                l_perceptual = self.cri_perceptual(preds[-1], self.gt)
+                l_total += l_perceptual
+                loss_dict['l_perceptual'] = l_perceptual
+
+            l_total.backward()
 
         use_grad_clip = self.opt['train'].get('use_grad_clip', True)
         if use_grad_clip:
@@ -307,9 +313,7 @@ class ImageFftModel(BaseModel):
                     L_img = sr_img[:, :, :3]
                     R_img = sr_img[:, :, 3:]
 
-                    # visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
-                    visual_dir = osp.join(self.opt['path']['visualization'], dataset_name)
-
+                    visual_dir = osp.join('visual_results', dataset_name, self.opt['name'])
                     imwrite(L_img, osp.join(visual_dir, f'{img_name}_L.png'))
                     imwrite(R_img, osp.join(visual_dir, f'{img_name}_R.png'))
                 else:
@@ -362,11 +366,9 @@ class ImageFftModel(BaseModel):
                 collected_metrics[metric] = torch.tensor(self.metric_results[metric]).float().to(self.device)
             collected_metrics['cnt'] = torch.tensor(cnt).float().to(self.device)
 
-            self.collected_metrics = collected_metrics
-
         keys = []
         metrics = []
-        for name, value in self.collected_metrics.items():
+        for name, value in collected_metrics.items():
             keys.append(name)
             metrics.append(value)
         metrics = torch.stack(metrics, 0)
@@ -401,8 +403,7 @@ class ImageFftModel(BaseModel):
         logger.info(log_str)
 
         log_dict = OrderedDict()
-        # for name, value in loss_dict.items():
-        for metric, value in metric_dict.items():
+        for name, value in metric_dict.items():
             log_dict[f'm_{metric}'] = value
 
         self.log_dict = log_dict
