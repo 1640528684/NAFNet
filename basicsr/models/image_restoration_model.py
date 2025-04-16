@@ -107,13 +107,6 @@ class ImageRestorationModel(BaseModel):
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data, is_val=False):
-        # 检查 data 字典中是否存在 lq 键
-        # if 'lq' not in data:
-        #     raise KeyError("The 'lq' key is missing in the data dictionary.")
-        # self.lq = data['lq'].to(self.device)
-        # if 'gt' in data:
-        #     self.gt = data['gt'].to(self.device)
-        # 检查 data 字典中是否存在 lq 键
         if 'lq' not in data:
             raise KeyError("The 'lq' key is missing in the data dictionary.")
         self.lq = data['lq'].to(self.device)
@@ -206,7 +199,6 @@ class ImageRestorationModel(BaseModel):
 
     def get_current_learning_rate(self):
         return self.optimizer_g.param_groups[0]['lr']
-        #return [self.optimizer_g.param_groups[0]['lr']]
 
     def optimize_parameters(self, current_iter, tb_logger):
         self.optimizer_g.zero_grad()
